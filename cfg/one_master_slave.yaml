@@ -1,0 +1,25 @@
+task_description: pick and place
+num_episodes: 100
+hdf5_cfg:
+  dataset_dir: data/
+  task_name: one_master_slave
+arm_cfg:
+  collection_type: one_master_slave
+  leader_port_left: /dev/ttyACM0
+  follower_can_left: can0
+  use_velocity: false
+  use_effort: false
+camera_cfg:
+  camera_names:
+  - cam_high
+  # - cam_right_wrist
+  # - cam_left_wrist
+  topics:
+    cam_high: 7
+    # cam_right_wrist: 4
+    # cam_left_wrist: 2
+collector_cfg:
+  arm_freq: 200
+  camera_freq: 15
+  cpu_affinity: null
+  realtime_priority: false

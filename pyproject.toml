@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a1z-data-collection"
+version = "0.1.0"
+description = "A1Z robotic arm teleoperation data collection"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "h5py>=3.8",
+    "omegaconf>=2.3",
+    "pynput>=1.7",
+    "opencv-python>=4.7",
+    "imageio>=2.31",
+    "imageio-ffmpeg>=0.4",
+    "python-can>=4.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["collectors*", "dataset*", "robots*", "utils*"]
