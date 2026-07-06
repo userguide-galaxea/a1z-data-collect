@@ -1,12 +1,12 @@
 """Camera device-index probe script.
 
 Run directly (not via pytest):
-    python -m a1z_lerobot.tools.probe_cameras
+    python tools/probe_cameras.py
 
 Tries to open and grab a frame from /dev/video0 ~ /dev/video31 one by one,
 saving successful ones to tools/tmp/camera_<N>.jpg and printing the matching
-/dev/v4l/by-id stable path, so you can eyeball the views and fill them into the
-rollout config.
+/dev/v4l/by-id stable path, so you can eyeball the views and fill them into
+camera_cfg.topics in cfg/*.yaml.
 """
 
 import glob
@@ -90,5 +90,5 @@ if __name__ == "__main__":
         print("no usable camera found, please check the device connections.")
         sys.exit(1)
     print(f"\nimages saved to {os.path.abspath(OUT_DIR)}/")
-    print("after confirming each view against the images, fill the by-id paths printed above into")
-    print("the index_or_path of a1z_lerobot/configs/rollout_a1z.yaml (prefer by-id to avoid device-index drift).")
+    print("after confirming each view against the images, fill the device index or by-id path")
+    print("printed above into camera_cfg.topics in cfg/*.yaml (prefer by-id to avoid device-index drift).")

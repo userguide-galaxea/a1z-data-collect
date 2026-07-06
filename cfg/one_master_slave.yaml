@@ -19,7 +19,7 @@ camera_cfg:
     # cam_right_wrist: 4
     # cam_left_wrist: 2
 collector_cfg:
-  arm_freq: 200
-  camera_freq: 15
+  arm_freq: 30
+  camera_freq: 30
   cpu_affinity: null
   realtime_priority: false
