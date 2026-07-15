@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VR Teleop</title>
+<style>
+  html, body {
+    margin: 0; height: 100%;
+    background: #0b0f14; color: #e1e8f0;
+    font-family: system-ui, sans-serif;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+
+  /* ── Logo ── */
+  #logo {
+    width: min(280px, 60vw);
+    margin-bottom: 48px;
+    opacity: 0.9;
+  }
+
+  /* ── Button ── */
+  #sendBtn {
+    font-size: 24px; font-weight: 600;
+    padding: 18px 56px;
+    border: 0; border-radius: 14px;
+    background: #2d7ff9; color: #fff;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  #sendBtn:hover { opacity: 0.85; }
+  #sendBtn:disabled {
+    background: #1d2a3a; color: #556b82; cursor: not-allowed;
+  }
+
+  /* ── Status ── */
+  #statusWrap {
+    display: none;
+    text-align: center;
+  }
+  #statusLine {
+    font-size: 28px; font-weight: 600;
+    letter-spacing: 2px;
+  }
+  #statusFPS {
+    font-size: 15px; color: #556b82;
+    margin-top: 12px;
+  }
+
+  .c-green  { color: #34d399; }   /* [锁定中] */
+  .c-yellow { color: #fbbf24; }   /* [回零中] */
+  .c-blue   { color: #60a5fa; }   /* [遥操作中] */
+  .c-magenta{ color: #c084fc; }   /* [按住-遥操作] */
+</style>
+</head>
+<body>
+
+<img id="logo" src="assets/logo.png" alt="Logo">
+
+<button id="sendBtn">发送数据</button>
+
+<div id="statusWrap">
+  <div id="statusLine"></div>
+  <div id="statusFPS"></div>
+</div>
+
+<script>
+"use strict";
+
+// ============================================================================
+//  Config
+// ============================================================================
+const WS_PORT = 8001;
+const WS_URL  = `ws://${location.hostname}:${WS_PORT}`;
+const SEND_HZ_CAP = 90;
+const SEND_MIN_INTERVAL = 1000 / SEND_HZ_CAP;
+
+// ============================================================================
+//  DOM
+// ============================================================================
+const logo  = document.getElementById("logo");
+const btn   = document.getElementById("sendBtn");
+const wrap  = document.getElementById("statusWrap");
+const line  = document.getElementById("statusLine");
+const fpsEl = document.getElementById("statusFPS");
+
+// ============================================================================
+//  State machine
+// ============================================================================
+let currentState = "锁定中";
+
+const STATE_COLORS = {
+  "锁定中":     "c-green",
+  "回零中":     "c-yellow",
+  "遥操作中":   "c-blue",
+  "按住-遥操作": "c-magenta",
+};
+
+// Background clear-colors for VR (dark versions of state colors)
+const STATE_BG = {
+  "锁定中":     [0.02, 0.12, 0.06, 1.0],  // dark green
+  "回零中":     [0.18, 0.14, 0.02, 1.0],  // dark yellow
+  "遥操作中":   [0.02, 0.08, 0.18, 1.0],  // dark blue
+  "按住-遥操作": [0.12, 0.04, 0.18, 1.0],  // dark magenta
+};
+
+// CSS colors for HUD text (2D canvas)
+const STATE_CSS = {
+  "锁定中":     "#34d399",
+  "回零中":     "#fbbf24",
+  "遥操作中":   "#60a5fa",
+  "按住-遥操作": "#c084fc",
+};
+
+function setState(name, fps) {
+  if (currentState === name && !fps) return;
+  currentState = name;
+  const cls = STATE_COLORS[name] || "c-green";
+  line.innerHTML = `<span class="${cls}">[${name}]</span>`;
+  if (fps !== undefined && fps !== null) {
+    fpsEl.textContent = `${fps} Hz`;
+  }
+}
+
+// ============================================================================
+//  WebSocket
+// ============================================================================
+let ws = null, wsReady = false, wsEverReady = false;
+const haptics = { left: null, right: null };
+
+function connectWS() {
+  try { ws = new WebSocket(WS_URL); } catch(e) {
+    if (currentState !== "锁定中") setState("按住-遥操作");
+    setTimeout(connectWS, 1500); return;
+  }
+  ws.onopen = () => {
+    wsReady = true; wsEverReady = true;
+    if (currentState === "按住-遥操作") setState("遥操作中");
+  };
+  ws.onclose = () => {
+    wsReady = false;
+    if (currentState === "遥操作中" || currentState === "按住-遥操作") setState("按住-遥操作");
+    setTimeout(connectWS, 1000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch(e) {} };
+  ws.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch(e) { return; }
+    if (m && m.haptic) {
+      const act = haptics[m.haptic.hand];
+      const amp = Math.max(0, Math.min(1, m.haptic.amp != null ? m.haptic.amp : 0.5));
+      const dur = m.haptic.duration || 150;
+      const count = m.haptic.count || 1;
+      if (act && act.pulse) {
+        const gap = 60;  // ms between pulses
+        for (let i = 0; i < count; i++) {
+          setTimeout(() => {
+            try { act.pulse(amp, dur); } catch(e) {}
+          }, i * (dur + gap));
+        }
+      }
+    }
+  };
+}
+connectWS();
+
+// ============================================================================
+//  WebGL HUD (Canvas 2D → texture → fullscreen quad)
+// ============================================================================
+const HUD_W = 640, HUD_H = 400;
+let hudCanvas, hudCtx, hudProgram, hudTex, hudVAO;
+let hudUniformTex, hudAttribPos, hudAttribUV;
+let logoImg = null;  // loaded at page start
+
+// Preload logo for VR HUD
+(function preloadLogo() {
+  const img = new Image();
+  img.onload = () => { logoImg = img; };
+  img.src = "assets/logo.png";
+})();
+
+// ── Shader sources (WebGL2) ──
+const HUD_VS_SRC = `#version 300 es
+in vec2 a_position;
+in vec2 a_texcoord;
+out vec2 v_texcoord;
+void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+    v_texcoord = a_texcoord;
+}`;
+
+const HUD_FS_SRC = `#version 300 es
+precision mediump float;
+in vec2 v_texcoord;
+uniform sampler2D u_texture;
+out vec4 fragColor;
+void main() {
+    fragColor = texture(u_texture, v_texcoord);
+}`;
+
+function compileShader(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(s);
+    gl.deleteShader(s);
+    throw new Error("Shader compile: " + log);
+  }
+  return s;
+}
+
+function initHUD(gl) {
+  // ── 2D canvas for text ──
+  hudCanvas = document.createElement("canvas");
+  hudCanvas.width = HUD_W;
+  hudCanvas.height = HUD_H;
+  hudCtx = hudCanvas.getContext("2d");
+  if (!hudCtx) throw new Error("2d context unavailable");
+
+  // ── Program ──
+  const vs = compileShader(gl, gl.VERTEX_SHADER, HUD_VS_SRC);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, HUD_FS_SRC);
+  hudProgram = gl.createProgram();
+  gl.attachShader(hudProgram, vs);
+  gl.attachShader(hudProgram, fs);
+  gl.linkProgram(hudProgram);
+  if (!gl.getProgramParameter(hudProgram, gl.LINK_STATUS)) {
+    throw new Error("Program link: " + gl.getProgramInfoLog(hudProgram));
+  }
+  hudUniformTex = gl.getUniformLocation(hudProgram, "u_texture");
+  hudAttribPos  = gl.getAttribLocation(hudProgram, "a_position");
+  hudAttribUV   = gl.getAttribLocation(hudProgram, "a_texcoord");
+
+  // ── Quad geometry (NDC, centered + slight right, ratio matched to canvas) ──
+  // Canvas 640x400 = ratio 1.6. Quad: width 0.8, height 0.5 → ratio 1.6
+  const x0 = -0.30, x1 = 0.50;  // width 0.8, shifted right by 0.1
+  const y0 = -0.10, y1 = 0.40;  // height 0.5, ratio = 0.8/0.5 = 1.6
+  const verts = new Float32Array([
+    x0, y0, 0.0, 1.0,   // bottom-left  tex: (0,1)
+    x0, y1, 0.0, 0.0,   // top-left     tex: (0,0)
+    x1, y0, 1.0, 1.0,   // bottom-right tex: (1,1)
+    x1, y1, 1.0, 0.0,   // top-right    tex: (1,0)
+  ]);
+
+  hudVAO = gl.createVertexArray();
+  gl.bindVertexArray(hudVAO);
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+  const stride = 4 * 4;
+  gl.enableVertexAttribArray(hudAttribPos);
+  gl.vertexAttribPointer(hudAttribPos, 2, gl.FLOAT, false, stride, 0);
+  gl.enableVertexAttribArray(hudAttribUV);
+  gl.vertexAttribPointer(hudAttribUV, 2, gl.FLOAT, false, stride, 8);
+  gl.bindVertexArray(null);
+
+  // ── Texture ──
+  hudTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, hudTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  // Initialize with transparent texture
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, HUD_W, HUD_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
+function renderHUD(gl, state, fps) {
+  if (!hudCtx) return;
+
+  // 1. Draw on 2D canvas — logo (original ratio) + FPS
+  hudCtx.clearRect(0, 0, HUD_W, HUD_H);
+
+  // Logo: scale to fit width, keep natural aspect ratio
+  if (logoImg && logoImg.complete && logoImg.naturalWidth > 0) {
+    const maxW = 200;
+    const w = Math.min(maxW, logoImg.naturalWidth);
+    const h = w * (logoImg.naturalHeight / logoImg.naturalWidth);
+    const lx = (HUD_W - w) / 2;
+    const ly = (HUD_H - h) / 2 - 20;  // slightly above center for FPS below
+    hudCtx.drawImage(logoImg, lx, ly, w, h);
+  }
+
+  // FPS centered below logo
+  hudCtx.font = "26px monospace";
+  hudCtx.textAlign = "center";
+  hudCtx.fillStyle = "#8899aa";
+  hudCtx.fillText(`${fps || 0} Hz`, HUD_W / 2, HUD_H / 2 + 110);
+
+  // 2. Upload to texture
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, hudTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, hudCanvas);
+
+  // 3. Draw quad
+  gl.useProgram(hudProgram);
+  gl.uniform1i(hudUniformTex, 0);
+  gl.bindVertexArray(hudVAO);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disable(gl.BLEND);
+  gl.bindVertexArray(null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
+// ============================================================================
+//  WebXR
+// ============================================================================
+let xrSession = null, gl = null, glLayer = null, refSpace = null;
+let lastSend = 0, frames = 0, lastRateTick = 0;
+let currentFPS = 0;
+let hudReady = false;
+
+// Detect support
+(async () => {
+  if (!("xr" in navigator) || !navigator.xr) {
+    btn.textContent = "WebXR 不可用";
+    btn.disabled = true;
+    return;
+  }
+  try {
+    const ok = await navigator.xr.isSessionSupported("immersive-vr");
+    if (ok) { btn.disabled = false; }
+    else { btn.textContent = "不支持 immersive-vr"; btn.disabled = true; }
+  } catch(e) { btn.textContent = "检测失败"; btn.disabled = true; }
+})();
+
+btn.addEventListener("click", async () => {
+  setState("回零中");
+
+  try {
+    xrSession = await navigator.xr.requestSession("immersive-vr", {
+      requiredFeatures: ["local-floor"],
+    });
+  } catch(e) {
+    setState("按住-遥操作");
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  gl = canvas.getContext("webgl2", { xrCompatible: true })
+    || canvas.getContext("webgl", { xrCompatible: true });
+  if (!gl) { setState("按住-遥操作"); return; }
+  if (gl.makeXRCompatible) { try { await gl.makeXRCompatible(); } catch(e) {} }
+
+  glLayer = new XRWebGLLayer(xrSession, gl);
+  xrSession.updateRenderState({ baseLayer: glLayer });
+
+  try { refSpace = await xrSession.requestReferenceSpace("local-floor"); }
+  catch(e) { refSpace = await xrSession.requestReferenceSpace("local"); }
+
+  // Init HUD (non-fatal if failed — background color still works)
+  try { initHUD(gl); hudReady = true; } catch(e) { hudReady = false; }
+
+  xrSession.addEventListener("end", () => {
+    xrSession = null;
+    hudReady = false;
+    btn.style.display = "";
+    wrap.style.display = "none";
+    setState("锁定中");
+  });
+
+  // Switch UI: button → status
+  btn.style.display = "none";
+  wrap.style.display = "block";
+
+  xrSession.requestAnimationFrame(onXRFrame);
+});
+
+function poseObj(pose) {
+  const t = pose.transform.position, o = pose.transform.orientation;
+  return { p: [t.x, t.y, t.z], q: [o.x, o.y, o.z, o.w] };
+}
+
+function onXRFrame(t, frame) {
+  const session = frame.session;
+  session.requestAnimationFrame(onXRFrame);
+
+  const vp = frame.getViewerPose(refSpace);
+
+  // ── Render ──
+  if (glLayer && gl) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+
+    // Color-coded background by state
+    const bg = STATE_BG[currentState] || [0.06, 0.08, 0.12, 1.0];
+    gl.clearColor(bg[0], bg[1], bg[2], bg[3]);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // HUD overlay (per-eye)
+    if (hudReady && vp) {
+      for (const view of vp.views) {
+        const v = glLayer.getViewport(view);
+        gl.viewport(v.x, v.y, v.width, v.height);
+        renderHUD(gl, currentState, currentFPS);
+      }
+    }
+  }
+
+  // FPS
+  frames++;
+  if (t - lastRateTick > 1000) { currentFPS = frames; frames = 0; lastRateTick = t; }
+
+  if (!wsReady || xrSession === null) return;
+  if (t - lastSend < SEND_MIN_INTERVAL) return;
+  if (ws.bufferedAmount > (1 << 16)) return;  // 缓冲区满时静默丢帧，不改变状态
+  lastSend = t;
+
+  const msg = { t: Date.now(), head: null, left: null, right: null };
+
+  if (vp) msg.head = poseObj(vp);
+
+  haptics.left = null; haptics.right = null;
+  for (const src of session.inputSources) {
+    const hand = src.handedness;
+    if (hand !== "left" && hand !== "right") continue;
+    if (!src.gripSpace) continue;
+    const gp = frame.getPose(src.gripSpace, refSpace);
+    if (!gp) continue;
+
+    const rec = poseObj(gp);
+    const g = src.gamepad;
+    if (g) {
+      const b = g.buttons, a = g.axes;
+      rec.trigger = (b && b[0] ? b[0].value : 0);
+      rec.grip    = (b && b[1] ? b[1].value : 0);
+      rec.lower   = (b && b[4] ? b[4].pressed : false);
+      rec.upper   = (b && b[5] ? b[5].pressed : false);
+      rec.ax      = [a[2] || 0, a[3] || 0];
+      if (g.hapticActuators && g.hapticActuators[0]) haptics[hand] = g.hapticActuators[0];
+    }
+    msg[hand] = rec;
+  }
+
+  try { ws.send(JSON.stringify(msg)); } catch(e) {}
+  setState("遥操作中", currentFPS);
+}
+</script>
+</body>
+</html>

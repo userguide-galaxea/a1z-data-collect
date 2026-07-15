@@ -19,6 +19,9 @@ class ArmCfg:
     use_velocity: bool = False
     use_effort: bool = False  # reserved — effort logging not yet implemented
 
+    vr_hand: str = "right"
+    urdf_path: Optional[str] = None
+
 
 @dataclass
 class CameraCfg:

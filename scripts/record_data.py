@@ -24,6 +24,22 @@ from robots.camera_calibration import calibrate_cameras
 from robots.dual_arm import DualArmLeader, DualArmFollower
 from leader import DynamixelBus
 
+from pathlib import Path
+
+try:
+    from a1z.robots.kinematics import Kinematics
+    from robots.vr_bridge import VRBridge
+    from robots.vr_utils import VRDataStore, init_vr_event_listener
+    from robots.vr_control import VRControl
+    _VR_AVAILABLE = True
+except ImportError:
+    _VR_AVAILABLE = False
+
+
+def _default_urdf_path():
+    import a1z.robots.get_robot as _gr
+    return str(Path(_gr.__file__).parent.parent / "robot_models" / "a1z" / "A1Z_G1Z.urdf")
+
 
 def _make_dual_leader(arm_cfg) -> DualArmLeader:
     """Build a DualArmLeader, using a shared bus when both ports are the same (daisy-chain)."""
@@ -76,6 +92,26 @@ def make_arm_readers(
         )
         controller = DualDeltaTeleopController()
 
+    elif t == "vr_teleop":
+        if not _VR_AVAILABLE:
+            raise ImportError("VR teleop requires a1z Kinematics and websockets. "
+                              "Install with: pip install pin websockets")
+        vr_store = VRDataStore()
+        bridge = VRBridge(vr_store)
+        bridge.start()
+
+        urdf = arm_cfg.urdf_path or _default_urdf_path()
+        ik_l = Kinematics(urdf)
+        ik_r = Kinematics(urdf)
+
+        leader = VRControl(vr_store=vr_store, ik_left=ik_l, ik_right=ik_r)
+        leader._bridge = bridge
+        follower = DualArmFollower(
+            A1ZFollowerArm(can_channel=arm_cfg.follower_can_left),
+            A1ZFollowerArm(can_channel=arm_cfg.follower_can_right),
+        )
+        controller = None
+
     else:
         raise ValueError(f"Unknown collection_type: {t}")
 
@@ -85,6 +121,11 @@ def make_arm_readers(
     except Exception:
         leader.close()
         raise
+
+    if t == "vr_teleop":
+        pos = follower.get_joint_pos()
+        leader.sync_state(pos[:6], pos[7:13])
+
     return leader, follower, controller
 
 
@@ -142,7 +183,10 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
         )
         camera_collector = CameraCollector(camera_readers, freq=collector_cfg.camera_freq, dataset=dataset)
 
-        listener, events = init_keyboard_listener()
+        if arm_cfg.collection_type == "vr_teleop":
+            listener, events = init_vr_event_listener(leader.vr_store)
+        else:
+            listener, events = init_keyboard_listener()
         cam_names = list(camera_readers.keys())
 
         count = 0
