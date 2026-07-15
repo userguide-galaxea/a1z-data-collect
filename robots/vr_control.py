@@ -101,6 +101,7 @@ class VRControl(LeaderArmInterface):
         if self._vr_store.get_button_upper_edge("right") and not self._returning_to_zero:
             self._returning_to_zero = True
             self._enabled = False
+            self._vr_store.send_haptic("right", count=2, amp=0.6)
 
         max_delta = _MAX_JOINT_VEL / 30.0
 
@@ -113,6 +114,7 @@ class VRControl(LeaderArmInterface):
         else:
             if self._vr_store.get_button_lower_edge("right"):
                 self._enabled = not self._enabled
+                self._vr_store.send_haptic("right", count=1, amp=0.8)
 
             teleop_active_r = self._enabled and r_grip > 0.5
             teleop_active_l = self._enabled and l_grip > 0.5

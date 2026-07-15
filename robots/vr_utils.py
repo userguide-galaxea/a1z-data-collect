@@ -1,3 +1,4 @@
+import queue
 import threading
 import time
 
@@ -25,6 +26,8 @@ class VRDataStore:
         self.right = VRHandData()
         self.head_pos = np.zeros(3, dtype=np.float64)
         self.head_quat = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+
+        self._haptic_queue = queue.Queue()
 
         self._prev = {
             "left": {"lower": False, "upper": False, "grip": 0.0, "stick_click": False},
@@ -94,6 +97,14 @@ class VRDataStore:
             self._edges[hand]["stick_click"] = False
         return edge
 
+    def send_haptic(self, hand, count=1, amp=0.5, duration=150.0):
+        self._haptic_queue.put({
+            "hand": hand,
+            "count": int(count),
+            "amp": float(amp),
+            "duration": float(duration),
+        })
+
 
 class VREventListener:
     def __init__(self, vr_store, events):
@@ -119,9 +130,12 @@ class VREventListener:
         while self._running:
             if self._vr_store.get_button_lower_edge("left"):
                 self._events["start_recording"] = True
+                self._vr_store.send_haptic("left", count=2, amp=0.5)
             if self._vr_store.get_button_upper_edge("left"):
                 self._events["finish_recording"] = True
+                self._vr_store.send_haptic("left", count=1, amp=0.5)
             if self._vr_store.get_stick_click_edge("left"):
+                self._vr_store.send_haptic("left", count=1, amp=0.5)
                 if self._vr_store.left.stick_x < -0.7:
                     self._events["rerecord"] = True
                     self._events["finish_recording"] = True

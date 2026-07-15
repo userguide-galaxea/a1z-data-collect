@@ -1,5 +1,6 @@
 import asyncio
 import json
+import queue
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -71,6 +72,7 @@ class VRBridge:
         self._thread = None
         self._httpd = None
         self._stop_event = threading.Event()
+        self._haptic_async_queue = None
 
     def start(self):
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -107,6 +109,22 @@ class VRBridge:
             self._loop.close()
 
     async def _ws_serve(self):
+        self._haptic_async_queue = asyncio.Queue()
+
+        def _bridge_haptic():
+            while not self._stop_event.is_set():
+                try:
+                    msg = self._vr_store._haptic_queue.get(timeout=0.1)
+                    try:
+                        self._loop.call_soon_threadsafe(
+                            self._haptic_async_queue.put_nowait, msg)
+                    except RuntimeError:
+                        pass
+                except queue.Empty:
+                    pass
+
+        threading.Thread(target=_bridge_haptic, daemon=True).start()
+
         print(f"[VRBridge] WebSocket ws://{self._ws_bind}:{self._ws_port}")
         async with websockets.serve(
             self._ws_handler, self._ws_bind, self._ws_port, max_queue=8
@@ -117,6 +135,16 @@ class VRBridge:
     async def _ws_handler(self, ws):
         peer = getattr(ws, "remote_address", "?")
         print(f"[VRBridge] Quest connected: {peer}")
+
+        async def _downlink():
+            while True:
+                payload = await self._haptic_async_queue.get()
+                try:
+                    await ws.send(json.dumps({"haptic": payload}))
+                except Exception:
+                    break
+
+        dl = asyncio.create_task(_downlink())
         try:
             async for raw in ws:
                 try:
@@ -127,6 +155,7 @@ class VRBridge:
         except Exception:
             pass
         finally:
+            dl.cancel()
             print(f"[VRBridge] Quest disconnected: {peer}")
 
     def _handle_frame(self, data):
