@@ -51,7 +51,8 @@ class VRControl(LeaderArmInterface):
 
         self._enabled = False
         self._returning_to_zero = False
-        self._anchored = False
+        self._anchored_r = False
+        self._anchored_l = False
 
         self._anchor_r_pos = None
         self._anchor_r_quat = None
@@ -113,24 +114,17 @@ class VRControl(LeaderArmInterface):
             if self._vr_store.get_button_lower_edge("right"):
                 self._enabled = not self._enabled
 
-            teleop_active = self._enabled and r_grip > 0.5
+            teleop_active_r = self._enabled and r_grip > 0.5
+            teleop_active_l = self._enabled and l_grip > 0.5
 
-            if teleop_active:
-                if not self._anchored:
+            if teleop_active_r:
+                if not self._anchored_r:
                     self._anchor_r_pos = r_pos.copy()
                     self._anchor_r_quat = r_quat.copy()
-                    self._anchor_l_pos = l_pos.copy()
-                    self._anchor_l_quat = l_quat.copy()
-
                     T_r = self._ik_right.fk(self._last_cmd_r)
                     self._anchor_ee_pos_r = T_r[:3, 3].copy()
                     self._anchor_ee_rot_r = T_r[:3, :3].copy()
-
-                    T_l = self._ik_left.fk(self._last_cmd_l)
-                    self._anchor_ee_pos_l = T_l[:3, 3].copy()
-                    self._anchor_ee_rot_l = T_l[:3, :3].copy()
-
-                    self._anchored = True
+                    self._anchored_r = True
 
                 target_r = self._solve_ik(
                     self._ik_right, self._nq_r,
@@ -139,6 +133,19 @@ class VRControl(LeaderArmInterface):
                     self._anchor_ee_pos_r, self._anchor_ee_rot_r,
                     self._last_cmd_r,
                 )
+            else:
+                target_r = self._last_cmd_r
+                self._anchored_r = False
+
+            if teleop_active_l:
+                if not self._anchored_l:
+                    self._anchor_l_pos = l_pos.copy()
+                    self._anchor_l_quat = l_quat.copy()
+                    T_l = self._ik_left.fk(self._last_cmd_l)
+                    self._anchor_ee_pos_l = T_l[:3, 3].copy()
+                    self._anchor_ee_rot_l = T_l[:3, :3].copy()
+                    self._anchored_l = True
+
                 target_l = self._solve_ik(
                     self._ik_left, self._nq_l,
                     l_pos, l_quat,
@@ -148,8 +155,7 @@ class VRControl(LeaderArmInterface):
                 )
             else:
                 target_l = self._last_cmd_l
-                target_r = self._last_cmd_r
-                self._anchored = False
+                self._anchored_l = False
 
             grip_l = float(np.clip(1.0 - l_trigger, 0.0, 1.0))
             grip_r = float(np.clip(1.0 - r_trigger, 0.0, 1.0))
@@ -171,7 +177,8 @@ class VRControl(LeaderArmInterface):
         if self._returning_to_zero:
             if np.max(np.abs(cmd_l)) < 0.01 and np.max(np.abs(cmd_r)) < 0.01:
                 self._returning_to_zero = False
-                self._anchored = False
+                self._anchored_r = False
+                self._anchored_l = False
 
         action = np.concatenate([cmd_l, [grip_l], cmd_r, [grip_r]])
         velocity = np.zeros(12, dtype=np.float64)

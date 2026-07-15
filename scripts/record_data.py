@@ -24,8 +24,6 @@ from robots.camera_calibration import calibrate_cameras
 from robots.dual_arm import DualArmLeader, DualArmFollower
 from leader import DynamixelBus
 
-from pathlib import Path
-
 try:
     from a1z.robots.kinematics import Kinematics
     from robots.vr_bridge import VRBridge
@@ -34,11 +32,6 @@ try:
     _VR_AVAILABLE = True
 except ImportError:
     _VR_AVAILABLE = False
-
-
-def _default_urdf_path():
-    import a1z.robots.get_robot as _gr
-    return str(Path(_gr.__file__).parent.parent / "robot_models" / "a1z" / "A1Z_G1Z.urdf")
 
 
 def _make_dual_leader(arm_cfg) -> DualArmLeader:
@@ -100,7 +93,12 @@ def make_arm_readers(
         bridge = VRBridge(vr_store)
         bridge.start()
 
-        urdf = arm_cfg.urdf_path or _default_urdf_path()
+        if arm_cfg.urdf_path:
+            urdf = arm_cfg.urdf_path
+        else:
+            from pathlib import Path
+            import a1z.robots.get_robot as _gr
+            urdf = str(Path(_gr.__file__).parent.parent / "robot_models" / "a1z" / "A1Z_G1Z.urdf")
         ik_l = Kinematics(urdf)
         ik_r = Kinematics(urdf)
 

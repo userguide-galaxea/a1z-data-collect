@@ -12,6 +12,7 @@ class VRHandData:
         self.grip = 0.0
         self.button_lower = False
         self.button_upper = False
+        self.stick_click = False
         self.stick_x = 0.0
         self.stick_y = 0.0
         self.timestamp = 0.0
@@ -26,12 +27,12 @@ class VRDataStore:
         self.head_quat = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
 
         self._prev = {
-            "left": {"lower": False, "upper": False, "grip": 0.0},
-            "right": {"lower": False, "upper": False, "grip": 0.0},
+            "left": {"lower": False, "upper": False, "grip": 0.0, "stick_click": False},
+            "right": {"lower": False, "upper": False, "grip": 0.0, "stick_click": False},
         }
         self._edges = {
-            "left": {"lower": False, "upper": False, "grip": False},
-            "right": {"lower": False, "upper": False, "grip": False},
+            "left": {"lower": False, "upper": False, "grip": False, "stick_click": False},
+            "right": {"lower": False, "upper": False, "grip": False, "stick_click": False},
         }
 
     def update_hand(self, hand, data):
@@ -43,6 +44,7 @@ class VRDataStore:
             h.grip = float(data.get("grip", 0.0))
             h.button_lower = bool(data.get("lower", False))
             h.button_upper = bool(data.get("upper", False))
+            h.stick_click = bool(data.get("stick_click", False))
             ax = data.get("ax", [0.0, 0.0])
             h.stick_x = float(ax[0]) if len(ax) > 0 else 0.0
             h.stick_y = float(ax[1]) if len(ax) > 1 else 0.0
@@ -53,12 +55,15 @@ class VRDataStore:
             lower = h.button_lower
             upper = h.button_upper
             grip = h.grip
+            sc = h.stick_click
             e["lower"] = lower and not p["lower"]
             e["upper"] = upper and not p["upper"]
             e["grip"] = grip > 0.5 and p["grip"] <= 0.5
+            e["stick_click"] = sc and not p["stick_click"]
             p["lower"] = lower
             p["upper"] = upper
             p["grip"] = grip
+            p["stick_click"] = sc
 
     def update_head(self, data):
         with self._lock:
@@ -81,6 +86,12 @@ class VRDataStore:
         with self._lock:
             edge = self._edges[hand]["grip"]
             self._edges[hand]["grip"] = False
+        return edge
+
+    def get_stick_click_edge(self, hand):
+        with self._lock:
+            edge = self._edges[hand]["stick_click"]
+            self._edges[hand]["stick_click"] = False
         return edge
 
 
@@ -110,9 +121,13 @@ class VREventListener:
                 self._events["start_recording"] = True
             if self._vr_store.get_button_upper_edge("left"):
                 self._events["finish_recording"] = True
-            if self._vr_store.get_grip_edge("left"):
-                self._events["stop"] = True
-                self._events["finish_recording"] = True
+            if self._vr_store.get_stick_click_edge("left"):
+                if self._vr_store.left.stick_x < -0.7:
+                    self._events["rerecord"] = True
+                    self._events["finish_recording"] = True
+                else:
+                    self._events["stop"] = True
+                    self._events["finish_recording"] = True
             time.sleep(0.02)
 
 

@@ -147,5 +147,6 @@ class VRBridge:
                 "grip": rec.get("grip", 0.0),
                 "lower": rec.get("lower", False),
                 "upper": rec.get("upper", False),
+                "stick_click": rec.get("stick_click", False),
                 "ax": rec.get("ax", [0.0, 0.0]),
             })
