@@ -161,7 +161,8 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
     os.system("stty -echo")
 
     leader, follower, controller = make_arm_readers(cfg)
-    listener = None
+    kb_listener = None
+    vr_listener = None
     camera_readers = {}
     arm_collector = None
     camera_collector = None
@@ -181,17 +182,18 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
         )
         camera_collector = CameraCollector(camera_readers, freq=collector_cfg.camera_freq, dataset=dataset)
 
+        # 键盘监听器始终启用（S/E/R/Q），VR 模式下再额外挂一个手柄监听器，
+        # 两者共享同一组 events 字典，因此键盘和手柄可同时操作。
+        kb_listener, events = init_keyboard_listener()
         if arm_cfg.collection_type == "vr_teleop":
-            listener, events = init_vr_event_listener(leader.vr_store)
-        else:
-            listener, events = init_keyboard_listener()
+            vr_listener, events = init_vr_event_listener(leader.vr_store, events)
         cam_names = list(camera_readers.keys())
 
         count = 0
 
         try:
             while count < cfg.num_episodes:
-                print(f"Press [S] to start episode {count + 1}/{cfg.num_episodes}")
+                print(f"Press [S] / VR left-lower(A) to start episode {count + 1}/{cfg.num_episodes}")
                 while not events["start_recording"]:
                     if events["stop"]:
                         break
@@ -202,7 +204,7 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
 
                 dataset.open_episode(cam_names, use_velocity=arm_cfg.use_velocity)
 
-                print("Recording... [E] finish  [R] rerecord  [Q] quit")
+                print("Recording... [E] finish  [R] rerecord  [Q] quit   (VR: left-upper(B)=finish, left-stick=rerecord/quit)")
                 arm_collector.start()
                 camera_collector.start()
 
@@ -242,9 +244,12 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
     except KeyboardInterrupt:
         print("\nAborted homing — emergency stop.")
     finally:
-        if listener is not None:
-            listener.stop()
-            listener.join(timeout=1.0)  # pynput blocks on read; stop() won't wake it, so don't wait forever
+        if vr_listener is not None:
+            vr_listener.stop()
+            vr_listener.join(timeout=1.0)
+        if kb_listener is not None:
+            kb_listener.stop()
+            kb_listener.join(timeout=1.0)  # pynput blocks on read; stop() won't wake it, so don't wait forever
         follower.stop()
         leader.close()
         for cam in camera_readers.values():

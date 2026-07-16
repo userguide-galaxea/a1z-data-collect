@@ -145,13 +145,15 @@ class VREventListener:
             time.sleep(0.02)
 
 
-def init_vr_event_listener(vr_store):
-    events = {
-        "start_recording": False,
-        "finish_recording": False,
-        "rerecord": False,
-        "stop": False,
-    }
+def init_vr_event_listener(vr_store, events=None):
+    # 若传入 events（通常是键盘监听器已经建好的那组），则复用，使键盘与 VR 按键共享同一组标志。
+    if events is None:
+        events = {
+            "start_recording": False,
+            "finish_recording": False,
+            "rerecord": False,
+            "stop": False,
+        }
     listener = VREventListener(vr_store, events)
     listener.start()
     return listener, events
