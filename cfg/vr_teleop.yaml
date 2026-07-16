@@ -1,0 +1,33 @@
+task_description: pick and place
+num_episodes: 100
+hdf5_cfg:
+  dataset_dir: data/
+  task_name: vr_teleop
+arm_cfg:
+  collection_type: vr_teleop
+  # VR 模式不使用 Dynamixel 主臂，以下两个串口字段可留空。
+  # leader_port_left: /dev/ttyACM0
+  # leader_port_right: /dev/ttyACM0
+  follower_can_left: can0
+  follower_can_right: can1
+  use_velocity: false
+  use_effort: false
+  # 可选：覆盖 IK 使用的 URDF（默认 a1z 自带的 A1Z_G1Z.urdf）
+  # urdf_path: /home/ping/a1z-data-collect/open-a1z-t/GALAXEA-A1Z/a1z/robot_models/a1z/A1Z_G1Z.urdf
+  # vr_hand: right  # 预留字段，当前未使用
+camera_cfg:
+  camera_names:
+  - cam_high
+  # - cam_right_wrist
+  # - cam_left_wrist
+  width: 1280
+  height: 720
+  topics:
+    cam_high: 4
+    # cam_right_wrist: 0
+    # cam_left_wrist: 2
+collector_cfg:
+  arm_freq: 30
+  camera_freq: 30
+  cpu_affinity: null
+  realtime_priority: false

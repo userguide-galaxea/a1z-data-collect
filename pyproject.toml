@@ -16,6 +16,9 @@ dependencies = [
     "imageio>=2.31",
     "imageio-ffmpeg>=0.4",
     "python-can>=4.0",
+    # VR 遥操作（collection_type=vr_teleop）依赖
+    "pin>=2.7",            # Pinocchio，VR IK 求解（a1z.robots.kinematics）
+    "websockets>=12.0",    # Quest WebXR 前端与 Python 后端的通信
 ]
 
 [tool.setuptools.packages.find]
