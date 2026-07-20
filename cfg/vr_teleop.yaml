@@ -18,14 +18,14 @@ arm_cfg:
 camera_cfg:
   camera_names:
   - cam_high
-  # - cam_right_wrist
-  # - cam_left_wrist
+  - cam_right_wrist
+  - cam_left_wrist
   width: 1280
   height: 720
   topics:
-    cam_high: 4
-    # cam_right_wrist: 0
-    # cam_left_wrist: 2
+    cam_high: 6
+    cam_right_wrist: 4
+    cam_left_wrist: 2
 collector_cfg:
   arm_freq: 30
   camera_freq: 30

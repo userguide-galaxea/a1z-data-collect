@@ -73,6 +73,14 @@ class VRDataStore:
             self.head_pos = np.array(data["p"], dtype=np.float64)
             self.head_quat = np.array(data["q"], dtype=np.float64)
 
+    def is_connected(self, hand, timeout=3.0):
+        """True 若该手最近 timeout 秒内有过上报（用作连接存活/掉线检测）。"""
+        with self._lock:
+            h = getattr(self, hand)
+            if h.timestamp == 0.0:
+                return False
+            return (time.monotonic() - h.timestamp) < timeout
+
     def get_button_lower_edge(self, hand):
         with self._lock:
             edge = self._edges[hand]["lower"]
@@ -127,21 +135,36 @@ class VREventListener:
             self._thread.join(timeout=timeout)
 
     def _poll(self):
+        _dbg_tick = 0
         while self._running:
             if self._vr_store.get_button_lower_edge("left"):
                 self._events["start_recording"] = True
                 self._vr_store.send_haptic("left", count=2, amp=0.5)
+                print("[DBG][VREvt] left-lower(X) edge → start_recording")
             if self._vr_store.get_button_upper_edge("left"):
                 self._events["finish_recording"] = True
                 self._vr_store.send_haptic("left", count=1, amp=0.5)
+                print("[DBG][VREvt] left-upper(Y) edge → finish_recording")
             if self._vr_store.get_stick_click_edge("left"):
                 self._vr_store.send_haptic("left", count=1, amp=0.5)
                 if self._vr_store.left.stick_x < -0.7:
                     self._events["rerecord"] = True
                     self._events["finish_recording"] = True
+                    print("[DBG][VREvt] left-stick(left) → rerecord")
                 else:
                     self._events["stop"] = True
                     self._events["finish_recording"] = True
+                    print("[DBG][VREvt] left-stick(right) → stop")
+            # [DBG] 每 ~2 秒打印一次心跳, 确认监听线程在跑 + 数据在更新
+            _dbg_tick += 1
+            if _dbg_tick >= 100:
+                _dbg_tick = 0
+                ls = self._vr_store.left
+                rs = self._vr_store.right
+                print(f"[DBG][VREvt] alive "
+                      f"L lo={int(ls.button_lower)} up={int(ls.button_upper)} ts={ls.timestamp:.2f} "
+                      f"R lo={int(rs.button_lower)} up={int(rs.button_upper)} ts={rs.timestamp:.2f} "
+                      f"ev={ {k: int(v) for k, v in self._events.items()} }")
             time.sleep(0.02)
 
 
