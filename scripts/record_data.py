@@ -113,16 +113,22 @@ def make_arm_readers(
     else:
         raise ValueError(f"Unknown collection_type: {t}")
 
+    print("[启动] 主臂(leader)连接中...")
     leader.open()
+    print("[启动] 主臂(leader)连接完成。")
     try:
+        print("[启动] 从臂(follower)启动中（电机上电 + 夹爪归零）...")
         follower.start()
+        print("[启动] 从臂(follower)启动完成。")
     except Exception:
         leader.close()
         raise
 
     if t == "vr_teleop":
+        print("[启动] 同步从臂关节状态到 VR 控制器...")
         pos = follower.get_joint_pos()
         leader.sync_state(pos[:6], pos[7:13])
+        print("[启动] 同步完成。")
 
     return leader, follower, controller
 
@@ -141,7 +147,8 @@ def make_camera_readers(cfg: DataCollectionCfg, config_file: str | None = None) 
             print(f"Camera mapping saved to {config_file}")
 
     readers = {}
-    for cam_name in cam_names:
+    for i, cam_name in enumerate(cam_names):
+        print(f"[启动] 相机 {cam_name} 初始化中 ({i+1}/{len(cam_names)})...")
         cam = OpenCVCamera(
             device_map[cam_name],
             width=cfg.camera_cfg.width,
@@ -150,6 +157,7 @@ def make_camera_readers(cfg: DataCollectionCfg, config_file: str | None = None) 
         )
         cam.open()
         readers[cam_name] = cam
+    print(f"[启动] 全部 {len(cam_names)} 个相机初始化完成。")
     return readers
 
 
@@ -170,8 +178,11 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
     dataset = None
     is_vr = arm_cfg.collection_type == "vr_teleop"
     try:
+        print("[启动] 相机初始化中...")
         camera_readers = make_camera_readers(cfg, config_file)
+        print("[启动] 数据集初始化中...")
         dataset = H5Dataset(cfg)
+        print("[启动] 数据集初始化完成。")
         arm_collector = ArmCollector(
             leader=leader,
             follower=follower,

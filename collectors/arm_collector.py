@@ -85,6 +85,8 @@ class ArmCollector:
                 self._follower.command(cmd, vel_ff if self._use_velocity else None)
             else:
                 cmd, vel_ff = action, vel
+                # VR 遥操作等模式: controller 为 None, 但仍需将指令发送给从臂。
+                self._follower.command(cmd, vel_ff if self._use_velocity else None)
 
             state = self._follower.get_joint_pos()
             ts_follower = now()
