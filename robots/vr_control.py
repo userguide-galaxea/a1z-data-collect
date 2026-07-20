@@ -49,6 +49,7 @@ _BASE_SAFETY_RADIUS = 0.12   # 末端目标位姿不得进入基座周围此半�
 _FILTER_WEIGHTS = (0.1, 0.2, 0.3, 0.4)  # 4 点加权滑动平均权重 (和=1.0)
 _OPEN_TIMEOUT_SEC = 60.0    # open() 等待 Quest 双手连接的最大秒数
 _CONN_DROP_TIMEOUT = 3.0    # 超过此秒未收到某手数据视为掉线
+_GRIP_ACTIVATE_THRESH = 0.15  # grip 值超过此阈值才认为"握住" → 激活遥操作 (Quest 的 grip 渐进值常不到 0.5, 降到 0.15 更可用)
 
 
 def remap_trigger(press_index, deadzone=TRIGGER_DEADZONE, curve_exp=TRIGGER_CURVE_EXP):
@@ -175,6 +176,20 @@ class VRControl(LeaderArmInterface):
         self._filter_r.reset()
 
     def read_as_vector(self):
+        # [DBG] 每秒打印一次双手所有按键值, 用于定位"按键没响应"的根因。
+        # 一行数组: R[grip,trig,lo,up,sc,sx,sy] L[...] enabled/anchored
+        if not hasattr(self, "_dbg_t"):
+            self._dbg_t = 0.0
+            self._dbg_last = time.monotonic()
+        now_dbg = time.monotonic()
+        if now_dbg - self._dbg_last >= 1.0:
+            rs = self._vr_store.right
+            ls = self._vr_store.left
+            print(f"[DBG] en={int(self._enabled)} "
+                  f"R[g={rs.grip:.2f},t={rs.trigger:.2f},lo={int(rs.button_lower)},up={int(rs.button_upper)},sc={int(rs.stick_click)},sx={rs.stick_x:.2f},sy={rs.stick_y:.2f},ts={rs.timestamp:.2f}] "
+                  f"L[g={ls.grip:.2f},t={ls.trigger:.2f},lo={int(ls.button_lower)},up={int(ls.button_upper)},sc={int(ls.stick_click)},sx={ls.stick_x:.2f},sy={ls.stick_y:.2f},ts={ls.timestamp:.2f}]")
+            self._dbg_last = now_dbg
+
         r_pos = self._vr_store.right.pos.copy()
         r_quat = self._vr_store.right.quat.copy()
         r_trigger = self._vr_store.right.trigger
@@ -227,8 +242,8 @@ class VRControl(LeaderArmInterface):
         else:
             # 右手 A键(下) 的使能切换已由 VRHandSupervisor 在独立线程处理,
             # 这里不再读边沿, 避免与 supervisor 竞争同一个 read-and-clear 边沿。
-            teleop_active_r = self._enabled and r_grip > 0.5 and r_connected
-            teleop_active_l = self._enabled and l_grip > 0.5 and l_connected
+            teleop_active_r = self._enabled and r_grip > _GRIP_ACTIVATE_THRESH and r_connected
+            teleop_active_l = self._enabled and l_grip > _GRIP_ACTIVATE_THRESH and l_connected
 
             if teleop_active_r:
                 if not self._anchored_r:
