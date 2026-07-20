@@ -27,7 +27,7 @@ from leader import DynamixelBus
 try:
     from a1z.robots.kinematics import Kinematics
     from robots.vr_bridge import VRBridge
-    from robots.vr_utils import VRDataStore, init_vr_event_listener
+    from robots.vr_utils import VRDataStore, init_vr_event_listener, init_vr_hand_supervisor
     from robots.vr_control import VRControl
     _VR_AVAILABLE = True
 except ImportError:
@@ -163,10 +163,12 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
     leader, follower, controller = make_arm_readers(cfg)
     kb_listener = None
     vr_listener = None
+    vr_hand_sup = None
     camera_readers = {}
     arm_collector = None
     camera_collector = None
     dataset = None
+    is_vr = arm_cfg.collection_type == "vr_teleop"
     try:
         camera_readers = make_camera_readers(cfg, config_file)
         dataset = H5Dataset(cfg)
@@ -182,18 +184,28 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
         )
         camera_collector = CameraCollector(camera_readers, freq=collector_cfg.camera_freq, dataset=dataset)
 
-        # 键盘监听器始终启用（S/E/R/Q），VR 模式下再额外挂一个手柄监听器，
-        # 两者共享同一组 events 字典，因此键盘和手柄可同时操作。
+        # 键盘监听器始终启用（S/E/R/Q）。
+        # VR 模式下:
+        #   - 左手柄监听器与键盘共享同一组 events, 二者平行可相互替代;
+        #   - 右手柄监听器(VRHandSupervisor)不进 events, 而是直接调用 leader
+        #     上的 toggle_enabled / trigger_return_to_zero / emergency_stop,
+        #     因此可在采集进行中即时控制机械臂起停, 不会被主循环的等待阻塞。
         kb_listener, events = init_keyboard_listener()
-        if arm_cfg.collection_type == "vr_teleop":
+        if is_vr:
             vr_listener, events = init_vr_event_listener(leader.vr_store, events)
+            vr_hand_sup = init_vr_hand_supervisor(leader.vr_store, leader)
         cam_names = list(camera_readers.keys())
 
         count = 0
 
         try:
             while count < cfg.num_episodes:
-                print(f"Press [S] / VR left-lower(A) to start episode {count + 1}/{cfg.num_episodes}")
+                if is_vr:
+                    print(f"\n=== 等待开始 episode {count + 1}/{cfg.num_episodes} ===")
+                    print("  → 按键盘 [S]  或  左手柄 X键(下)  开始本条采集")
+                    print("  → 右手柄 A键(下): 使能/失能遥操作  B键(上): 回零  摇杆按下: 急停")
+                else:
+                    print(f"Press [S] to start episode {count + 1}/{cfg.num_episodes}")
                 while not events["start_recording"]:
                     if events["stop"]:
                         break
@@ -204,7 +216,16 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
 
                 dataset.open_episode(cam_names, use_velocity=arm_cfg.use_velocity)
 
-                print("Recording... [E] finish  [R] rerecord  [Q] quit   (VR: left-upper(B)=finish, left-stick=rerecord/quit)")
+                if is_vr:
+                    enabled = getattr(leader, "teleop_enabled", False)
+                    print("\n[录制中] episode {}/{}".format(count + 1, cfg.num_episodes))
+                    print("  键盘: [E]结束  [R]重录  [Q]退出")
+                    print("  左手柄: Y键(上)=结束  摇杆按下+左推=重录  摇杆按下+右推=退出")
+                    print("  右手柄: A键(下)=使能/失能  B键(上)=回零  摇杆按下=急停")
+                    print(f"  当前遥操作状态: {'使能(握住手柄即可操作)' if enabled else '失能(双臂冻结, 按右手A键使能)'}")
+                    print("  → 握住手柄(side grip)即可控制机械臂; 松开则冻结目标。")
+                else:
+                    print("Recording... [E] finish  [R] rerecord  [Q] quit")
                 arm_collector.start()
                 camera_collector.start()
 
@@ -244,6 +265,9 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
     except KeyboardInterrupt:
         print("\nAborted homing — emergency stop.")
     finally:
+        if vr_hand_sup is not None:
+            vr_hand_sup.stop()
+            vr_hand_sup.join(timeout=1.0)
         if vr_listener is not None:
             vr_listener.stop()
             vr_listener.join(timeout=1.0)

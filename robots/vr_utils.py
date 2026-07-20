@@ -135,36 +135,25 @@ class VREventListener:
             self._thread.join(timeout=timeout)
 
     def _poll(self):
-        _dbg_tick = 0
         while self._running:
             if self._vr_store.get_button_lower_edge("left"):
                 self._events["start_recording"] = True
                 self._vr_store.send_haptic("left", count=2, amp=0.5)
-                print("[DBG][VREvt] left-lower(X) edge → start_recording")
+                print("[VR] 左手 X键(下) → 开始采集")
             if self._vr_store.get_button_upper_edge("left"):
                 self._events["finish_recording"] = True
                 self._vr_store.send_haptic("left", count=1, amp=0.5)
-                print("[DBG][VREvt] left-upper(Y) edge → finish_recording")
+                print("[VR] 左手 Y键(上) → 结束本条")
             if self._vr_store.get_stick_click_edge("left"):
                 self._vr_store.send_haptic("left", count=1, amp=0.5)
                 if self._vr_store.left.stick_x < -0.7:
                     self._events["rerecord"] = True
                     self._events["finish_recording"] = True
-                    print("[DBG][VREvt] left-stick(left) → rerecord")
+                    print("[VR] 左手摇杆按下+左推 → 重录本条")
                 else:
                     self._events["stop"] = True
                     self._events["finish_recording"] = True
-                    print("[DBG][VREvt] left-stick(right) → stop")
-            # [DBG] 每 ~2 秒打印一次心跳, 确认监听线程在跑 + 数据在更新
-            _dbg_tick += 1
-            if _dbg_tick >= 100:
-                _dbg_tick = 0
-                ls = self._vr_store.left
-                rs = self._vr_store.right
-                print(f"[DBG][VREvt] alive "
-                      f"L lo={int(ls.button_lower)} up={int(ls.button_upper)} ts={ls.timestamp:.2f} "
-                      f"R lo={int(rs.button_lower)} up={int(rs.button_upper)} ts={rs.timestamp:.2f} "
-                      f"ev={ {k: int(v) for k, v in self._events.items()} }")
+                    print("[VR] 左手摇杆按下+右推 → 停止并退出")
             time.sleep(0.02)
 
 
@@ -180,3 +169,52 @@ def init_vr_event_listener(vr_store, events=None):
     listener = VREventListener(vr_store, events)
     listener.start()
     return listener, events
+
+
+class VRHandSupervisor:
+    """右手柄按键的全局监听器（不进入 events 字典）。
+
+    与 VREventListener 的关键区别：它直接调用 leader（VRControl）上的方法
+    来使能/失能/回零/急停遥操作，而不是写 events 标志再让主循环轮询——
+    因此它可以在“采集进行中”也能即时改变机械臂的运行状态，不受主循环
+    正在等待 finish_recording 的影响（这是原先右手按键阻塞的根因）。
+    """
+
+    def __init__(self, vr_store, leader):
+        self._vr_store = vr_store
+        self._leader = leader
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._poll, daemon=True)
+        self._thread.start()
+        return self
+
+    def stop(self):
+        self._running = False
+
+    def join(self, timeout=None):
+        if self._thread is not None:
+            self._thread.join(timeout=timeout)
+
+    def _poll(self):
+        while self._running:
+            # A键(下): 切换使能 / 失能 —— 握持后才能操作，失能则冻结。
+            if self._vr_store.get_button_lower_edge("right"):
+                self._leader.toggle_enabled()
+            # B键(上): 回零 —— 收回到零位并清锚；下一次 A键+握持 重新锚定。
+            if self._vr_store.get_button_upper_edge("right"):
+                self._leader.trigger_return_to_zero()
+            # 右摇杆按下: 急停 —— 立即冻结双臂目标（等价于失能，但带更强提示）。
+            if self._vr_store.get_stick_click_edge("right"):
+                self._leader.emergency_stop()
+            time.sleep(0.02)
+
+
+def init_vr_hand_supervisor(vr_store, leader):
+    """启动右手柄的全局监听，用于在遥操作进行中控制机械臂的起停。"""
+    sup = VRHandSupervisor(vr_store, leader)
+    sup.start()
+    return sup

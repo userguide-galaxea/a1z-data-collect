@@ -99,13 +99,48 @@ class VRControl(LeaderArmInterface):
         self._nq_l = self._ik_left._model.nq
         self._nq_r = self._ik_right._model.nq
 
-        # [DBG] 调试: 定位"按下按键无响应/卡顿"。每秒打印一次状态摘要。
-        self._dbg_frames = 0
-        self._dbg_last_t = time.monotonic()
-
     @property
     def vr_store(self):
         return self._vr_store
+
+    # --- 右手柄全局监听调用的控制方法 ---
+    # 这些方法由 VRHandSupervisor 在独立线程里调用，可在采集进行中即时改变
+    # 机械臂的运行状态，不经过 events 字典，因此不会被主循环的等待阻塞。
+
+    def toggle_enabled(self):
+        """A键(下): 切换使能/失能。"""
+        self._enabled = not self._enabled
+        self._vr_store.send_haptic("right", count=1, amp=0.8)
+        if self._enabled:
+            print("[VR] 右手 A键(下) → 遥操作使能 (握住手柄即可操作)")
+        else:
+            self._anchored_r = False
+            self._anchored_l = False
+            print("[VR] 右手 A键(下) → 遥操作失能 (双臂冻结)")
+
+    def trigger_return_to_zero(self):
+        """B键(上): 回零。"""
+        if self._returning_to_zero:
+            return
+        self._returning_to_zero = True
+        self._enabled = False
+        self._anchored_r = False
+        self._anchored_l = False
+        self._vr_store.send_haptic("right", count=2, amp=0.6)
+        print("[VR] 右手 B键(上) → 双臂回零中...")
+
+    def emergency_stop(self):
+        """右摇杆按下: 急停。"""
+        self._enabled = False
+        self._anchored_r = False
+        self._anchored_l = False
+        self._vr_store.send_haptic("right", count=3, amp=1.0)
+        print("[VR] 右手摇杆按下 → 急停 (双臂冻结)")
+
+    @property
+    def teleop_enabled(self):
+        """供 UI 提示查询当前是否使能。"""
+        return self._enabled
 
     def open(self):
         """阻塞直到 Quest 双手均上报过数据, 或超时抛 TimeoutError。
@@ -140,24 +175,6 @@ class VRControl(LeaderArmInterface):
         self._filter_r.reset()
 
     def read_as_vector(self):
-        self._dbg_frames += 1
-        now_dbg = time.monotonic()
-        if now_dbg - self._dbg_last_t >= 1.0:
-            rs = self._vr_store.right
-            ls = self._vr_store.left
-            r_conn = self._vr_store.is_connected("right", _CONN_DROP_TIMEOUT)
-            l_conn = self._vr_store.is_connected("left", _CONN_DROP_TIMEOUT)
-            print(
-                f"[DBG] frames={self._dbg_frames} "
-                f"enabled={self._enabled} ret_home={self._returning_to_zero} "
-                f"R{('C' if r_conn else 'X')}{('A' if self._anchored_r else '-')} "
-                f"grip={rs.grip:.2f} trig={rs.trigger:.2f} lo={int(rs.button_lower)} up={int(rs.button_upper)} ts={rs.timestamp:.2f} "
-                f"L{('C' if l_conn else 'X')}{('A' if self._anchored_l else '-')} "
-                f"grip={ls.grip:.2f} trig={ls.trigger:.2f} lo={int(ls.button_lower)} up={int(ls.button_upper)} ts={ls.timestamp:.2f}"
-            )
-            self._dbg_last_t = now_dbg
-            self._dbg_frames = 0
-
         r_pos = self._vr_store.right.pos.copy()
         r_quat = self._vr_store.right.quat.copy()
         r_trigger = self._vr_store.right.trigger
@@ -195,11 +212,9 @@ class VRControl(LeaderArmInterface):
                 self._vr_store.send_haptic("left", count=2, amp=0.6)
                 self._was_disconnected_l = False
 
-        if self._vr_store.get_button_upper_edge("right") and not self._returning_to_zero:
-            self._returning_to_zero = True
-            self._enabled = False
-            self._vr_store.send_haptic("right", count=2, amp=0.6)
-            print("[DBG] 右上键按下 → 进入回零模式")
+        # 右手 B键(上)/A键(下)/摇杆 的边沿全部由 VRHandSupervisor 在独立线程
+        # 处理 (调用 trigger_return_to_zero / toggle_enabled / emergency_stop)。
+        # 这里不再读右手边沿, 避免与 supervisor 竞争同一个 read-and-clear 边沿。
 
         max_delta = _MAX_JOINT_VEL / 30.0
 
@@ -210,11 +225,8 @@ class VRControl(LeaderArmInterface):
             grip_r = 1.0
             max_delta = _SLOW_JOINT_VEL / 30.0
         else:
-            if self._vr_store.get_button_lower_edge("right"):
-                self._enabled = not self._enabled
-                self._vr_store.send_haptic("right", count=1, amp=0.8)
-                print(f"[DBG] 右下键按下 → enabled 切换为 {self._enabled}")
-
+            # 右手 A键(下) 的使能切换已由 VRHandSupervisor 在独立线程处理,
+            # 这里不再读边沿, 避免与 supervisor 竞争同一个 read-and-clear 边沿。
             teleop_active_r = self._enabled and r_grip > 0.5 and r_connected
             teleop_active_l = self._enabled and l_grip > 0.5 and l_connected
 
