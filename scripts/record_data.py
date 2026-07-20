@@ -25,7 +25,7 @@ from robots.dual_arm import DualArmLeader, DualArmFollower
 from leader import DynamixelBus
 
 try:
-    from a1z.robots.kinematics import Kinematics
+    from robots.vr_arm_ik import A1ZArmIK
     from robots.vr_bridge import VRBridge
     from robots.vr_utils import VRDataStore, init_vr_event_listener, init_vr_hand_supervisor
     from robots.vr_control import VRControl
@@ -87,7 +87,7 @@ def make_arm_readers(
 
     elif t == "vr_teleop":
         if not _VR_AVAILABLE:
-            raise ImportError("VR teleop requires a1z Kinematics and websockets. "
+            raise ImportError("VR teleop requires A1ZArmIK and websockets. "
                               "Install with: pip install pin websockets")
         vr_store = VRDataStore()
         bridge = VRBridge(vr_store)
@@ -99,10 +99,10 @@ def make_arm_readers(
             from pathlib import Path
             import a1z.robots.get_robot as _gr
             urdf = str(Path(_gr.__file__).parent.parent / "robot_models" / "a1z" / "A1Z_G1Z.urdf")
-        ik_l = Kinematics(urdf)
-        ik_r = Kinematics(urdf)
+        arm_ik_l = A1ZArmIK(urdf_path=urdf)
+        arm_ik_r = A1ZArmIK(urdf_path=urdf)
 
-        leader = VRControl(vr_store=vr_store, ik_left=ik_l, ik_right=ik_r)
+        leader = VRControl(vr_store=vr_store, arm_ik_left=arm_ik_l, arm_ik_right=arm_ik_r)
         leader._bridge = bridge
         follower = DualArmFollower(
             A1ZFollowerArm(can_channel=arm_cfg.follower_can_left),

@@ -3,7 +3,6 @@ import time
 import numpy as np
 
 from utils.interfaces import LeaderArmInterface
-from robots.vr_filter import WeightedMovingFilter
 
 
 def _quat_xyzw_to_R(q):
@@ -42,14 +41,13 @@ _JOINT_LIMITS = [
 _MAX_JOINT_VEL = np.array([1.0, 1.0, 1.0, 1.5, 3.0, 4.0], dtype=np.float64)
 _SLOW_JOINT_VEL = np.array([0.3, 0.3, 0.3, 0.5, 0.5, 0.8], dtype=np.float64)
 
-# --- VR 遥操作细化参数 (参考 vr_joy/arm_control.py) ---
-TRIGGER_DEADZONE = 0.05      # trigger 死区: 小于此值视为未按
-TRIGGER_CURVE_EXP = 0.7     # power-law 曲线指数, 使轻按更线性、更易控
-_BASE_SAFETY_RADIUS = 0.12   # 末端目标位姿不得进入基座周围此半径球内 (防撞操作者胸口)
-_FILTER_WEIGHTS = (0.1, 0.2, 0.3, 0.4)  # 4 点加权滑动平均权重 (和=1.0)
-_OPEN_TIMEOUT_SEC = 60.0    # open() 等待 Quest 双手连接的最大秒数
-_CONN_DROP_TIMEOUT = 3.0    # 超过此秒未收到某手数据视为掉线
-_GRIP_ACTIVATE_THRESH = 0.15  # grip 值超过此阈值才认为"握住" → 激活遥操作 (Quest 的 grip 渐进值常不到 0.5, 降到 0.15 更可用)
+# --- VR 遥操作参数 (参考 vr_joy/arm_control.py) ---
+TRIGGER_DEADZONE = 0.05
+TRIGGER_CURVE_EXP = 1.0   # 1.0=线性响应 (0.7=前段灵敏, >1.0=后段灵敏)
+_BASE_SAFETY_RADIUS = 0.12
+_OPEN_TIMEOUT_SEC = 60.0
+_CONN_DROP_TIMEOUT = 3.0
+_GRIP_ACTIVATE_THRESH = 0.15
 
 
 def remap_trigger(press_index, deadzone=TRIGGER_DEADZONE, curve_exp=TRIGGER_CURVE_EXP):
@@ -64,10 +62,15 @@ def remap_trigger(press_index, deadzone=TRIGGER_DEADZONE, curve_exp=TRIGGER_CURV
 
 
 class VRControl(LeaderArmInterface):
-    def __init__(self, vr_store, ik_left, ik_right, scale=1.0):
+    """VR 遥操作控制器 — 使用 A1ZArmIK (5-DOF IK + roll 分离) 做逆向运动学。
+
+    arm_ik_left / arm_ik_right 应为 robots.vr_arm_ik.A1ZArmIK 实例。
+    """
+
+    def __init__(self, vr_store, arm_ik_left, arm_ik_right, scale=1.0):
         self._vr_store = vr_store
-        self._ik_left = ik_left
-        self._ik_right = ik_right
+        self._arm_ik_l = arm_ik_left
+        self._arm_ik_r = arm_ik_right
         self._scale = scale
 
         self._enabled = False
@@ -89,24 +92,16 @@ class VRControl(LeaderArmInterface):
         self._last_grip_l = 1.0
         self._last_grip_r = 1.0
 
-        # 关节目标滤波器: 对 IK 解算的 q[:6] 做加权滑动平均, 抑制抖动。
-        self._filter_l = WeightedMovingFilter(_FILTER_WEIGHTS, data_size=6)
-        self._filter_r = WeightedMovingFilter(_FILTER_WEIGHTS, data_size=6)
-
-        # 连接掉线状态追踪: 进入掉线时清锚; 恢复时震动一次提示操作者。
+        # 连接掉线状态追踪
         self._was_disconnected_l = False
         self._was_disconnected_r = False
-
-        self._nq_l = self._ik_left._model.nq
-        self._nq_r = self._ik_right._model.nq
 
     @property
     def vr_store(self):
         return self._vr_store
 
     # --- 右手柄全局监听调用的控制方法 ---
-    # 这些方法由 VRHandSupervisor 在独立线程里调用，可在采集进行中即时改变
-    # 机械臂的运行状态，不经过 events 字典，因此不会被主循环的等待阻塞。
+    # 由 VRHandSupervisor 在独立线程里调用，不经过 events 字典。
 
     def toggle_enabled(self):
         """A键(下): 切换使能/失能。"""
@@ -144,11 +139,7 @@ class VRControl(LeaderArmInterface):
         return self._enabled
 
     def open(self):
-        """阻塞直到 Quest 双手均上报过数据, 或超时抛 TimeoutError。
-
-        原 Bug 3: 无超时无限阻塞, Quest 没连接或只有一只手时程序看起来卡死。
-        现加打印 + 超时, 操作者能看到"正在等什么"。
-        """
+        """阻塞直到 Quest 双手均上报过数据，或超时抛 TimeoutError。"""
         print("[VRControl] 等待 Quest 双手连接 (左手 + 右手) ...")
         deadline = time.monotonic() + _OPEN_TIMEOUT_SEC
         while self._vr_store.right.timestamp == 0 or self._vr_store.left.timestamp == 0:
@@ -168,27 +159,35 @@ class VRControl(LeaderArmInterface):
             bridge.stop()
 
     def sync_state(self, q_left, q_right):
+        """将从臂当前关节状态同步到 VR 控制器和 IK 热启动初值。"""
         self._last_cmd_l = np.asarray(q_left, dtype=np.float64).copy()
         self._last_cmd_r = np.asarray(q_right, dtype=np.float64).copy()
-        # 锚定/回零后, 滤波器窗口已不再代表当前构型, 必须清空, 否则首帧会
-        # 用旧窗口的加权结果, 出现一帧跳变。
-        self._filter_l.reset()
-        self._filter_r.reset()
+        self._arm_ik_l.sync_state(q_left)
+        self._arm_ik_r.sync_state(q_right)
+
+    def _state_key(self):
+        """返回当前状态的摘要 key，用于检测状态变化。"""
+        return (self._enabled, self._anchored_r, self._anchored_l, self._returning_to_zero)
 
     def read_as_vector(self):
-        # [DBG] 每秒打印一次双手所有按键值, 用于定位"按键没响应"的根因。
-        # 一行数组: R[grip,trig,lo,up,sc,sx,sy] L[...] enabled/anchored
-        if not hasattr(self, "_dbg_t"):
-            self._dbg_t = 0.0
-            self._dbg_last = time.monotonic()
-        now_dbg = time.monotonic()
-        if now_dbg - self._dbg_last >= 1.0:
-            rs = self._vr_store.right
-            ls = self._vr_store.left
-            print(f"[DBG] en={int(self._enabled)} "
-                  f"R[g={rs.grip:.2f},t={rs.trigger:.2f},lo={int(rs.button_lower)},up={int(rs.button_upper)},sc={int(rs.stick_click)},sx={rs.stick_x:.2f},sy={rs.stick_y:.2f},ts={rs.timestamp:.2f}] "
-                  f"L[g={ls.grip:.2f},t={ls.trigger:.2f},lo={int(ls.button_lower)},up={int(ls.button_upper)},sc={int(ls.stick_click)},sx={ls.stick_x:.2f},sy={ls.stick_y:.2f},ts={ls.timestamp:.2f}]")
-            self._dbg_last = now_dbg
+        # 状态变化时打印一行
+        sk = self._state_key()
+        if not hasattr(self, "_last_state_key"):
+            self._last_state_key = None
+        if sk != self._last_state_key:
+            self._last_state_key = sk
+            if self._returning_to_zero:
+                print("[VR] 状态: 回零中...")
+            elif self._enabled and self._anchored_r and self._anchored_l:
+                print("[VR] 状态: 双手遥操作中")
+            elif self._enabled and self._anchored_r:
+                print("[VR] 状态: 右手遥操作中 (左手待握持)")
+            elif self._enabled and self._anchored_l:
+                print("[VR] 状态: 左手遥操作中 (右手待握持)")
+            elif self._enabled:
+                print("[VR] 状态: 已使能 — 握住 side grip 开始遥操作")
+            else:
+                print("[VR] 状态: 已锁定 (按右手 A键 使能)")
 
         r_pos = self._vr_store.right.pos.copy()
         r_quat = self._vr_store.right.quat.copy()
@@ -200,8 +199,7 @@ class VRControl(LeaderArmInterface):
         l_trigger = self._vr_store.left.trigger
         l_grip = self._vr_store.left.grip
 
-        # 连接掉线检测: 某只手超过 _CONN_DROP_TIMEOUT 秒没上报 → 视为掉线。
-        # 掉线期间冻结对应臂 (清锚, 回到 last_cmd); 恢复时震动一次提示操作者。
+        # 连接掉线检测
         r_connected = self._vr_store.is_connected("right", _CONN_DROP_TIMEOUT)
         l_connected = self._vr_store.is_connected("left", _CONN_DROP_TIMEOUT)
 
@@ -227,10 +225,6 @@ class VRControl(LeaderArmInterface):
                 self._vr_store.send_haptic("left", count=2, amp=0.6)
                 self._was_disconnected_l = False
 
-        # 右手 B键(上)/A键(下)/摇杆 的边沿全部由 VRHandSupervisor 在独立线程
-        # 处理 (调用 trigger_return_to_zero / toggle_enabled / emergency_stop)。
-        # 这里不再读右手边沿, 避免与 supervisor 竞争同一个 read-and-clear 边沿。
-
         max_delta = _MAX_JOINT_VEL / 30.0
 
         if self._returning_to_zero:
@@ -240,8 +234,6 @@ class VRControl(LeaderArmInterface):
             grip_r = 1.0
             max_delta = _SLOW_JOINT_VEL / 30.0
         else:
-            # 右手 A键(下) 的使能切换已由 VRHandSupervisor 在独立线程处理,
-            # 这里不再读边沿, 避免与 supervisor 竞争同一个 read-and-clear 边沿。
             teleop_active_r = self._enabled and r_grip > _GRIP_ACTIVATE_THRESH and r_connected
             teleop_active_l = self._enabled and l_grip > _GRIP_ACTIVATE_THRESH and l_connected
 
@@ -249,17 +241,16 @@ class VRControl(LeaderArmInterface):
                 if not self._anchored_r:
                     self._anchor_r_pos = r_pos.copy()
                     self._anchor_r_quat = r_quat.copy()
-                    T_r = self._ik_right.fk(self._last_cmd_r)
-                    self._anchor_ee_pos_r = T_r[:3, 3].copy()
-                    self._anchor_ee_rot_r = T_r[:3, :3].copy()
+                    # 用 arm_ik 的 sync_state 替代旧 fk(): 同时设置热启动初值 + 获取当前 EE 位姿
+                    self._arm_ik_r.sync_state(self._last_cmd_r)
+                    self._anchor_ee_pos_r, self._anchor_ee_rot_r = self._arm_ik_r.get_ee_pose()
                     self._anchored_r = True
 
                 target_r = self._solve_ik(
-                    self._ik_right, self._nq_r,
+                    self._arm_ik_r,
                     r_pos, r_quat,
                     self._anchor_r_pos, self._anchor_r_quat,
                     self._anchor_ee_pos_r, self._anchor_ee_rot_r,
-                    self._last_cmd_r, self._filter_r,
                 )
             else:
                 target_r = self._last_cmd_r
@@ -269,17 +260,15 @@ class VRControl(LeaderArmInterface):
                 if not self._anchored_l:
                     self._anchor_l_pos = l_pos.copy()
                     self._anchor_l_quat = l_quat.copy()
-                    T_l = self._ik_left.fk(self._last_cmd_l)
-                    self._anchor_ee_pos_l = T_l[:3, 3].copy()
-                    self._anchor_ee_rot_l = T_l[:3, :3].copy()
+                    self._arm_ik_l.sync_state(self._last_cmd_l)
+                    self._anchor_ee_pos_l, self._anchor_ee_rot_l = self._arm_ik_l.get_ee_pose()
                     self._anchored_l = True
 
                 target_l = self._solve_ik(
-                    self._ik_left, self._nq_l,
+                    self._arm_ik_l,
                     l_pos, l_quat,
                     self._anchor_l_pos, self._anchor_l_quat,
                     self._anchor_ee_pos_l, self._anchor_ee_rot_l,
-                    self._last_cmd_l, self._filter_l,
                 )
             else:
                 target_l = self._last_cmd_l
@@ -307,18 +296,21 @@ class VRControl(LeaderArmInterface):
                 self._returning_to_zero = False
                 self._anchored_r = False
                 self._anchored_l = False
+                self._arm_ik_l.calibrate()
+                self._arm_ik_r.calibrate()
+                print("[VR] 回零完成，双臂已锁定。按右手 A键 重新使能。")
 
         action = np.concatenate([cmd_l, [grip_l], cmd_r, [grip_r]])
         velocity = np.zeros(12, dtype=np.float64)
         return action, velocity
 
-    def _solve_ik(self, ik, nq, vr_pos, vr_quat, anchor_pos, anchor_quat,
-                  anchor_ee_pos, anchor_ee_rot, last_cmd, filt):
+    def _solve_ik(self, arm_ik, vr_pos, vr_quat, anchor_pos, anchor_quat,
+                  anchor_ee_pos, anchor_ee_rot):
+        """计算 delta → 目标位姿 → 调用 A1ZArmIK.set_ee_target() 求解 IK。"""
         delta_pos = (vr_pos - anchor_pos) * self._scale
         target_pos = anchor_ee_pos + delta_pos
 
-        # 基座安全半径: 末端目标不得进入基座周围 _BASE_SAFETY_RADIUS 米球内,
-        # 防止操作者把目标拉到自己胸口导致机械臂撞基座/操作者。
+        # 基座安全半径: 防止末端目标进入基座周围球内 (防撞操作者胸口)
         target_dist = float(np.linalg.norm(target_pos))
         if target_dist < _BASE_SAFETY_RADIUS:
             if target_dist > 1e-6:
@@ -330,17 +322,8 @@ class VRControl(LeaderArmInterface):
         R_delta = _quat_xyzw_to_R(q_delta)
         target_rot = R_delta @ anchor_ee_rot
 
-        target_pose = np.eye(4, dtype=np.float64)
-        target_pose[:3, :3] = target_rot
-        target_pose[:3, 3] = target_pos
-
-        init_q = np.zeros(nq, dtype=np.float64)
-        init_q[:6] = last_cmd
-
-        converged, q = ik.ik(target_pose, init_q=init_q, damping=1e-3, max_iters=50)
-        q6 = q[:6].copy() if converged else last_cmd.copy()
-        # 对 IK 解算结果做加权滑动平均, 抑制高频抖动。
-        return filt.next(q6)
+        # A1ZArmIK.set_ee_target 内部做增量 IK + 滤波，返回 N_TOTAL_DOFS 维关节目标
+        return arm_ik.set_ee_target(target_pos, target_rot)
 
     def _apply_velocity_limit(self, target_l, target_r, max_delta):
         delta_l = target_l - self._last_cmd_l
