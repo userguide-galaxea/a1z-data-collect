@@ -124,6 +124,11 @@ def make_arm_readers(
         leader.close()
         raise
 
+    # VR 模式下把从臂句柄绑给 leader，让回零/急停在 leader 内部就能真正驱动从臂，
+    # 而不依赖外层主循环是否正在轮询。
+    if is_vr and hasattr(leader, "attach_follower"):
+        leader.attach_follower(follower)
+
     if t == "vr_teleop":
         print("[启动] 同步从臂关节状态到 VR 控制器...")
         pos = follower.get_joint_pos()
@@ -147,16 +152,33 @@ def make_camera_readers(cfg: DataCollectionCfg, config_file: str | None = None) 
             print(f"Camera mapping saved to {config_file}")
 
     readers = {}
+    failures = []
     for i, cam_name in enumerate(cam_names):
-        print(f"[启动] 相机 {cam_name} 初始化中 ({i+1}/{len(cam_names)})...")
+        dev = device_map[cam_name]
+        print(f"[启动] 相机 {cam_name} (device={dev}) 初始化中 ({i+1}/{len(cam_names)})...")
         cam = OpenCVCamera(
-            device_map[cam_name],
+            dev,
             width=cfg.camera_cfg.width,
             height=cfg.camera_cfg.height,
             fps=cfg.collector_cfg.camera_freq,
         )
-        cam.open()
+        try:
+            cam.open()
+        except Exception as e:
+            # 记录失败但继续尝试其它相机, 最后统一报错 — 这样用户能看到全部未连接的相机,
+            # 而不是只看到第一个就停 (且后续 VR/数据集初始化的报错会掩盖真正原因)。
+            print(f"[启动] ✗ 相机 {cam_name} (device={dev}) 初始化失败: {e}")
+            failures.append((cam_name, dev, str(e)))
+            continue
         readers[cam_name] = cam
+        print(f"[启动] ✓ 相机 {cam_name} (device={dev}) 初始化完成。")
+
+    if failures:
+        detail = "; ".join(f"{n}(dev={d}): {msg}" for n, d, msg in failures)
+        raise RuntimeError(
+            f"相机初始化失败: {len(failures)}/{len(cam_names)} 个相机未能初始化 — {detail}. "
+            "请检查对应 USB 相机是否已物理连接/未被其它进程占用。"
+        )
     print(f"[启动] 全部 {len(cam_names)} 个相机初始化完成。")
     return readers
 

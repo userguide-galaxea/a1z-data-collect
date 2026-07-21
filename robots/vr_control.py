@@ -1,3 +1,4 @@
+import threading
 import time
 
 import numpy as np
@@ -65,6 +66,14 @@ class VRControl(LeaderArmInterface):
     """VR 遥操作控制器 — 使用 A1ZArmIK (5-DOF IK + roll 分离) 做逆向运动学。
 
     arm_ik_left / arm_ik_right 应为 robots.vr_arm_ik.A1ZArmIK 实例。
+
+    右手柄控制（A使能 / B回零 / 摇杆急停）由 VRHandSupervisor 在独立线程里
+    直接调用本类方法，全局生效——不依赖外层采集主循环是否在轮询。本类在
+    read_as_vector 里根据 _enabled / _returning_to_zero / _estopped 三个互斥
+    状态产出动作：
+        - 使能:       从 VR 手柄位姿解算 IK 驱动从臂
+        - 回零:       朝零位匀速收，由主循环发到从臂真正运动
+        - 急停:       冻结双臂目标（保持当前位置不动）
     """
 
     def __init__(self, vr_store, arm_ik_left, arm_ik_right, scale=1.0):
@@ -72,6 +81,10 @@ class VRControl(LeaderArmInterface):
         self._arm_ik_l = arm_ik_left
         self._arm_ik_r = arm_ik_right
         self._scale = scale
+
+        # follower 句柄在 attach_follower() 时填上，用于回零模式下真正驱动从臂。
+        # 不在 __init__ 传是为了不破坏 VRControl 与底层硬件的解耦（IK 测试时不要求 follower）。
+        self._follower = None
 
         self._enabled = False
         self._returning_to_zero = False
@@ -96,6 +109,16 @@ class VRControl(LeaderArmInterface):
         self._was_disconnected_l = False
         self._was_disconnected_r = False
 
+        # 锁：右手柄全局监听线程（VRHandSupervisor）与主控制循环（read_as_vector）
+        # 都会改 _enabled / _returning_to_zero / 急停标志，加锁保证状态原子。
+        self._state_lock = threading.Lock()
+        # 急停标志：置位后冻结双臂目标，只有重新使能(A键)才清除。
+        self._estopped = False
+
+    def attach_follower(self, follower):
+        """绑定从臂句柄，供回零模式下真正驱动从臂运动。"""
+        self._follower = follower
+
     @property
     def vr_store(self):
         return self._vr_store
@@ -105,31 +128,44 @@ class VRControl(LeaderArmInterface):
 
     def toggle_enabled(self):
         """A键(下): 切换使能/失能。"""
-        self._enabled = not self._enabled
+        with self._state_lock:
+            if self._estopped:
+                # 急停状态：A键清除急停并使能。
+                self._estopped = False
+                self._enabled = True
+            else:
+                self._enabled = not self._enabled
+            new_enabled = self._enabled
+            if not new_enabled:
+                self._anchored_r = False
+                self._anchored_l = False
         self._vr_store.send_haptic("right", count=1, amp=0.8)
-        if self._enabled:
+        if new_enabled:
             print("[VR] 右手 A键(下) → 遥操作使能 (握住手柄即可操作)")
         else:
-            self._anchored_r = False
-            self._anchored_l = False
             print("[VR] 右手 A键(下) → 遥操作失能 (双臂冻结)")
 
     def trigger_return_to_zero(self):
         """B键(上): 回零。"""
-        if self._returning_to_zero:
-            return
-        self._returning_to_zero = True
-        self._enabled = False
-        self._anchored_r = False
-        self._anchored_l = False
+        with self._state_lock:
+            if self._returning_to_zero:
+                return
+            self._returning_to_zero = True
+            self._enabled = False
+            self._estopped = False
+            self._anchored_r = False
+            self._anchored_l = False
         self._vr_store.send_haptic("right", count=2, amp=0.6)
         print("[VR] 右手 B键(上) → 双臂回零中...")
 
     def emergency_stop(self):
         """右摇杆按下: 急停。"""
-        self._enabled = False
-        self._anchored_r = False
-        self._anchored_l = False
+        with self._state_lock:
+            self._enabled = False
+            self._estopped = True
+            self._returning_to_zero = False
+            self._anchored_r = False
+            self._anchored_l = False
         self._vr_store.send_haptic("right", count=3, amp=1.0)
         print("[VR] 右手摇杆按下 → 急停 (双臂冻结)")
 
@@ -167,7 +203,8 @@ class VRControl(LeaderArmInterface):
 
     def _state_key(self):
         """返回当前状态的摘要 key，用于检测状态变化。"""
-        return (self._enabled, self._anchored_r, self._anchored_l, self._returning_to_zero)
+        return (self._enabled, self._anchored_r, self._anchored_l,
+                self._returning_to_zero, self._estopped)
 
     def read_as_vector(self):
         # 状态变化时打印一行
@@ -176,7 +213,9 @@ class VRControl(LeaderArmInterface):
             self._last_state_key = None
         if sk != self._last_state_key:
             self._last_state_key = sk
-            if self._returning_to_zero:
+            if self._estopped:
+                print("[VR] 状态: 已急停 (双臂冻结, 按右手 A键 使能恢复)")
+            elif self._returning_to_zero:
                 print("[VR] 状态: 回零中...")
             elif self._enabled and self._anchored_r and self._anchored_l:
                 print("[VR] 状态: 双手遥操作中")
@@ -227,7 +266,17 @@ class VRControl(LeaderArmInterface):
 
         max_delta = _MAX_JOINT_VEL / 30.0
 
-        if self._returning_to_zero:
+        # 急停：冻结双臂目标（保持当前位置），不做任何移动。
+        # 与回零/使能互斥（emergency_stop() 已把另外两个标志清零）。
+        if self._estopped:
+            target_l = self._last_cmd_l.copy()
+            target_r = self._last_cmd_r.copy()
+            grip_l = self._last_grip_l
+            grip_r = self._last_grip_r
+            self._anchored_r = False
+            self._anchored_l = False
+        elif self._returning_to_zero:
+            # 回零：target 朝零位匀速收（受 max_delta 限速），由主循环发到从臂真正运动。
             target_l = np.zeros(6, dtype=np.float64)
             target_r = np.zeros(6, dtype=np.float64)
             grip_l = 1.0
@@ -299,6 +348,11 @@ class VRControl(LeaderArmInterface):
                 self._arm_ik_l.calibrate()
                 self._arm_ik_r.calibrate()
                 print("[VR] 回零完成，双臂已锁定。按右手 A键 重新使能。")
+            else:
+                # 回零中：把当前 command 反馈给 IK 热启动初值，避免下次使能时 IK 从
+                # 旧构型出发产生跳变（read_as_vector 每帧都会更新 self._last_cmd_*）。
+                self._arm_ik_l.sync_state(cmd_l)
+                self._arm_ik_r.sync_state(cmd_r)
 
         action = np.concatenate([cmd_l, [grip_l], cmd_r, [grip_r]])
         velocity = np.zeros(12, dtype=np.float64)

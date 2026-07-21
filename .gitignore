@@ -29,6 +29,7 @@ docs
 
 # Local-only tests (not published)
 /tests/
+/test/
 
 *.jpg
 *.png

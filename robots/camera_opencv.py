@@ -31,6 +31,20 @@ class OpenCVCamera(CameraInterface):
         time.sleep(2.0)
         for _ in range(10):
             self._cap.read()
+        # 验证相机确实能出帧: 设备节点存在但物理未连接时, isOpened() 仍可能为 True,
+        # 而 read() 持续返回空。这里强制做一次有效读取, 失败则抛错, 避免静默失败。
+        ok = False
+        for _ in range(20):
+            ret, buf = self._cap.read()
+            if ret and buf is not None:
+                ok = True
+                break
+            time.sleep(0.1)
+        if not ok:
+            raise RuntimeError(
+                f"Camera {self._device} opened but produces no frames "
+                f"(read() returned empty 20 times). 设备可能未物理连接或被占用。"
+            )
 
     def read(self) -> np.ndarray | None:
         """Return decoded RGB frame (used by camera calibration)."""

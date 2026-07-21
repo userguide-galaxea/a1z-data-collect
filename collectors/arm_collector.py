@@ -63,19 +63,10 @@ class ArmCollector:
     def _loop(self) -> None:
         self._apply_os_settings()
 
-        # [DBG] 心跳: 每秒打印一次循环存活 + read_as_vector 耗时, 用于定位"卡住"在哪个阶段
-        _hb_frames = 0
-        _hb_last = time.monotonic()
-        _hb_max_read_ms = 0.0
-        _hb_max_iter_ms = 0.0
-
         while not self._stop_event.is_set():
             t0 = time.monotonic()
 
             action, vel = self._leader.read_as_vector()
-            t_after_read = time.monotonic()
-            read_ms = (t_after_read - t0) * 1000.0
-            if read_ms > _hb_max_read_ms: _hb_max_read_ms = read_ms
 
             ts_leader = now()
 
@@ -105,17 +96,6 @@ class ArmCollector:
                 self._dataset.append_arm(step)
 
             _precise_sleep(self._period, t0)
-
-            iter_ms = (time.monotonic() - t0) * 1000.0
-            if iter_ms > _hb_max_iter_ms: _hb_max_iter_ms = iter_ms
-            _hb_frames += 1
-            if time.monotonic() - _hb_last >= 1.0:
-                print(f"[HB] arm_collector {_hb_frames}it/s "
-                      f"read_max={_hb_max_read_ms:.1f}ms iter_max={_hb_max_iter_ms:.1f}ms")
-                _hb_frames = 0
-                _hb_last = time.monotonic()
-                _hb_max_read_ms = 0.0
-                _hb_max_iter_ms = 0.0
 
     def _apply_os_settings(self) -> None:
         if self._cpu_affinity is not None:
