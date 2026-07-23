@@ -91,6 +91,12 @@ class VRControl(LeaderArmInterface):
         self._anchored_r = False
         self._anchored_l = False
 
+        # 录制中标志：由 record_data.py 在 arm_collector.start/stop 时设置。
+        # episode 之间（非录制态）按 B 键回零时，由 _zero_loop 独立线程直接
+        # 驱动从臂 glide 回零；录制态下则由 read_as_vector() 的软回零处理。
+        self._recording = False
+        self._zero_thread = None
+
         self._anchor_r_pos = None
         self._anchor_r_quat = None
         self._anchor_l_pos = None
@@ -119,6 +125,17 @@ class VRControl(LeaderArmInterface):
         """绑定从臂句柄，供回零模式下真正驱动从臂运动。"""
         self._follower = follower
 
+    def set_recording(self, recording: bool):
+        """由 record_data.py 在 arm_collector.start/stop 时调用。
+
+        episode 之间（非录制态）按 B 键回零时，由 _zero_loop 独立线程直接
+        驱动从臂 glide 回零；录制态下则由 read_as_vector() 的软回零处理。
+        """
+        self._recording = recording
+        if not recording:
+            # 录制刚结束：若此时有挂起的回零请求，启动独立回零线程。
+            self._maybe_start_zero_thread()
+
     @property
     def vr_store(self):
         return self._vr_store
@@ -146,17 +163,66 @@ class VRControl(LeaderArmInterface):
             print("[VR] 右手 A键(下) → 遥操作失能 (双臂冻结)")
 
     def trigger_return_to_zero(self):
-        """B键(上): 回零。"""
+        """B键(上): 回零。
+
+        录制中：设 _returning_to_zero 标志，由 read_as_vector() 软回零。
+        非录制中（episode 之间）：启动独立线程 _zero_loop 直接驱动从臂 glide 回零。
+        """
         with self._state_lock:
-            if self._returning_to_zero:
+            if self._returning_to_zero or (self._zero_thread is not None and self._zero_thread.is_alive()):
                 return
-            self._returning_to_zero = True
             self._enabled = False
             self._estopped = False
             self._anchored_r = False
             self._anchored_l = False
-        self._vr_store.send_haptic("right", count=2, amp=0.6)
-        print("[VR] 右手 B键(上) → 双臂回零中...")
+            if self._recording:
+                # 录制中：软回零，由 read_as_vector() 消费 _returning_to_zero 标志
+                self._returning_to_zero = True
+                self._vr_store.send_haptic("right", count=2, amp=0.6)
+                print("[VR] 右手 B键(上) → 双臂回零中 (软回零, 录制中)...")
+            else:
+                # 非录制中：独立线程硬回零
+                self._vr_store.send_haptic("right", count=2, amp=0.6)
+                print("[VR] 右手 B键(上) → 双臂回零中 (独立线程, episode 间)...")
+                self._zero_thread = threading.Thread(target=self._zero_loop, daemon=True)
+                self._zero_thread.start()
+
+    def _maybe_start_zero_thread(self):
+        """录制刚结束时，若操作者已按过 B 键（_returning_to_zero 挂起），启动独立回零。"""
+        with self._state_lock:
+            if self._returning_to_zero and not self._recording:
+                self._returning_to_zero = False
+                if self._zero_thread is None or not self._zero_thread.is_alive():
+                    self._zero_thread = threading.Thread(target=self._zero_loop, daemon=True)
+                    self._zero_thread.start()
+                    print("[VR] 检测到录制结束时有挂起的回零请求, 启动独立回零线程...")
+
+    def _zero_loop(self):
+        """独立线程：用 utils.homing.glide_to 把从臂匀速收到零位。
+
+        不依赖 ArmCollector/read_as_vector，因此 episode 之间也能回零。
+        回零完成后更新 _last_cmd_* 与 IK 热启动初值，保证下次使能无跳变。
+        """
+        if self._follower is None:
+            print("[VR] 回零失败: 未绑定从臂 (follower is None)")
+            return
+        try:
+            from utils.homing import glide_to, home_vector
+            dim = len(self._follower.get_joint_pos())
+            home = home_vector(dim)
+            glide_to(self._follower, home, secs=3.0)
+            # 同步回零后的真实关节角到控制器内部状态
+            pos = self._follower.get_joint_pos()
+            self._last_cmd_l = np.asarray(pos[:6], dtype=np.float64).copy()
+            self._last_cmd_r = np.asarray(pos[7:13], dtype=np.float64).copy()
+            self._arm_ik_l.sync_state(self._last_cmd_l)
+            self._arm_ik_r.sync_state(self._last_cmd_r)
+            print("[VR] 独立回零完成, 双臂已锁定。按右手 A键 重新使能。")
+        except Exception as e:
+            print(f"[VR] 独立回零异常: {e}")
+        finally:
+            with self._state_lock:
+                self._returning_to_zero = False
 
     def emergency_stop(self):
         """右摇杆按下: 急停。"""

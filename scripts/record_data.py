@@ -126,7 +126,8 @@ def make_arm_readers(
 
     # VR 模式下把从臂句柄绑给 leader，让回零/急停在 leader 内部就能真正驱动从臂，
     # 而不依赖外层主循环是否正在轮询。
-    if is_vr and hasattr(leader, "attach_follower"):
+    # 注意: is_vr 定义在 run() 里, 此函数作用域访问不到, 用 t 判断。
+    if t == "vr_teleop" and hasattr(leader, "attach_follower"):
         leader.attach_follower(follower)
 
     if t == "vr_teleop":
@@ -259,6 +260,8 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
                     print("  → 握住手柄(side grip)即可控制机械臂; 松开则冻结目标。")
                 else:
                     print("Recording... [E] finish  [R] rerecord  [Q] quit")
+                if is_vr and hasattr(leader, "set_recording"):
+                    leader.set_recording(True)
                 arm_collector.start()
                 camera_collector.start()
 
@@ -269,6 +272,8 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
 
                 arm_collector.stop()
                 camera_collector.stop()
+                if is_vr and hasattr(leader, "set_recording"):
+                    leader.set_recording(False)
 
                 if events["stop"]:
                     dataset.close_episode(discard=True)
