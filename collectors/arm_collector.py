@@ -49,8 +49,10 @@ class ArmCollector:
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._error: Exception | None = None
 
     def start(self) -> None:
+        self._error = None
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -60,7 +62,18 @@ class ArmCollector:
         if self._thread is not None:
             self._thread.join()
 
+    def raise_if_failed(self) -> None:
+        if self._error is not None:
+            raise RuntimeError("Arm collection stopped after a control or read error") from self._error
+
     def _loop(self) -> None:
+        try:
+            self._run_loop()
+        except Exception as exc:
+            self._error = exc
+            self._stop_event.set()
+
+    def _run_loop(self) -> None:
         self._apply_os_settings()
 
         while not self._stop_event.is_set():

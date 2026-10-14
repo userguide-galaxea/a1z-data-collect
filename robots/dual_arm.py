@@ -74,9 +74,21 @@ class DualArmFollower(FollowerArmInterface):
 
     def stop(self):
         # Stop both arms concurrently so disable frames hit the CAN buses simultaneously.
-        t_left  = threading.Thread(target=self._left.stop)
-        t_right = threading.Thread(target=self._right.stop)
+        errors = [None, None]
+
+        def _stop(arm, idx):
+            try:
+                arm.stop()
+            except Exception as exc:
+                errors[idx] = exc
+
+        t_left  = threading.Thread(target=_stop, args=(self._left, 0))
+        t_right = threading.Thread(target=_stop, args=(self._right, 1))
         t_left.start()
         t_right.start()
         t_left.join()
         t_right.join()
+        if errors[0] is not None or errors[1] is not None:
+            raise RuntimeError(
+                f"Arm stop failed — left: {errors[0]}  right: {errors[1]}"
+            ) from next(exc for exc in errors if exc is not None)

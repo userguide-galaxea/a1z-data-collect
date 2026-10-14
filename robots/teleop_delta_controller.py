@@ -1,6 +1,6 @@
 """Delta-based teleoperation controller.
 
-Mirrors the delta mapping from a1z-t/teleop_app/teleop.py:
+Mirrors the delta mapping from a1z-t/teleop_app/teleop_runtime.py:
   - Captures leader and follower zero positions on the first step
   - Sends: follower_init + (leader_pos - leader_init)
   - Clamps per-step spike to avoid sudden jumps

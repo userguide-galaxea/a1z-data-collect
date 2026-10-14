@@ -1,5 +1,5 @@
 import numpy as np
-from sdk.leader import DynamixelServoReader, DynamixelBus
+from a1z_t import DynamixelServoReader, DynamixelBus
 from teleop_app.config import load_config
 from utils.interfaces import LeaderArmInterface
 
@@ -11,7 +11,7 @@ class A1ZTLeaderArm(LeaderArmInterface):
         self,
         port: str,
         side: str = "left",
-        config_path: str = None,
+        config_path: str | None = None,
         shared_bus: "DynamixelBus | None" = None,
     ):
         cfg = load_config(config_path)

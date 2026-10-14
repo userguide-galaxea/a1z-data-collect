@@ -1,0 +1,1 @@
+../a1z-t/scripts/setup_ports.sh

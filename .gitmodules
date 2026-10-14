@@ -1,4 +1,4 @@
 [submodule "a1z-t"]
 	path = a1z-t
 	url = https://gitlab.galaxea-ai.com/lemo/a1z-t.git
-	branch = dev
+	branch = main

@@ -7,6 +7,7 @@ Usage:
 """
 
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from omegaconf import OmegaConf
@@ -33,8 +34,8 @@ def _make_dual_leader(arm_cfg) -> DualArmLeader:
     if Path(port_l).resolve() == Path(port_r).resolve():
         raise ValueError("a1z-t requires separate left and right Leader serial ports")
 
-    left = A1ZTLeaderArm(port=port_l, side="left")
-    right = A1ZTLeaderArm(port=port_r, side="right")
+    left = A1ZTLeaderArm(port=port_l, side="left", config_path=arm_cfg.leader_config_path)
+    right = A1ZTLeaderArm(port=port_r, side="right", config_path=arm_cfg.leader_config_path)
     print(f"[DualArmLeader] independent ports: left={port_l}  right={port_r}")
     return DualArmLeader(left, right)
 
@@ -47,7 +48,9 @@ def make_arm_readers(
 
     if t == "one_master":
         # Leader IS the follower — no separate arm to control
-        leader = A1ZTLeaderArm(port=arm_cfg.leader_port_left, side="left")
+        leader = A1ZTLeaderArm(
+            port=arm_cfg.leader_port_left, side="left", config_path=arm_cfg.leader_config_path
+        )
         follower = A1ZFollowerArm(can_channel=arm_cfg.follower_can_left)
         controller = None
 
@@ -60,7 +63,9 @@ def make_arm_readers(
         controller = None
 
     elif t == "one_master_slave":
-        leader = A1ZTLeaderArm(port=arm_cfg.leader_port_left, side="left")
+        leader = A1ZTLeaderArm(
+            port=arm_cfg.leader_port_left, side="left", config_path=arm_cfg.leader_config_path
+        )
         follower = A1ZFollowerArm(can_channel=arm_cfg.follower_can_left)
         controller = DeltaTeleopController()
 
@@ -161,12 +166,14 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
                 camera_collector.start()
 
                 while not events["finish_recording"]:
+                    arm_collector.raise_if_failed()
                     if events["stop"]:
                         break
                     time.sleep(0.02)
 
                 arm_collector.stop()
                 camera_collector.stop()
+                arm_collector.raise_if_failed()
 
                 if events["stop"]:
                     dataset.close_episode(discard=True)
@@ -189,6 +196,11 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
                 camera_collector.stop()
             if dataset is not None:
                 dataset.close_episode(discard=True)  # join writer procs, drop .tmp
+        except Exception:
+            arm_collector.stop()
+            camera_collector.stop()
+            dataset.close_episode(discard=True)
+            raise
 
         print("Returning to home...")
         return_to_home(follower, 3.0)  # home after normal finish / Q / interrupt
@@ -199,12 +211,13 @@ def run(cfg: DataCollectionCfg, config_file: str | None = None) -> None:
         if listener is not None:
             listener.stop()
             listener.join(timeout=1.0)  # pynput blocks on read; stop() won't wake it, so don't wait forever
-        follower.stop()
-        leader.close()
-        for cam in camera_readers.values():
-            cam.close()
-        termios.tcflush(sys.stdin, termios.TCIOFLUSH)
-        os.system("stty sane")
+        with ExitStack() as cleanup:
+            cleanup.callback(os.system, "stty sane")
+            cleanup.callback(termios.tcflush, sys.stdin, termios.TCIOFLUSH)
+            for cam in camera_readers.values():
+                cleanup.callback(cam.close)
+            cleanup.callback(leader.close)
+            cleanup.callback(follower.stop)
 
 
 def main():

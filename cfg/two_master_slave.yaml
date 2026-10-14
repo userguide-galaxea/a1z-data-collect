@@ -7,8 +7,9 @@ arm_cfg:
   collection_type: two_master_slave
   leader_port_left: /dev/ttyACM0
   leader_port_right: /dev/ttyACM1
-  follower_can_left: can0
-  follower_can_right: can1
+  leader_config_path: null  # or cfg/a1z_t.yaml with a1z_t_version: EVT/PVT
+  follower_can_left: can_left
+  follower_can_right: can_right
   use_velocity: true
   use_effort: false
 camera_cfg:

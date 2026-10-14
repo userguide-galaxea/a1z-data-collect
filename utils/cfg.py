@@ -11,6 +11,7 @@ class ArmCfg:
     # leader (master arm) serial ports
     leader_port_left: Optional[str] = None
     leader_port_right: Optional[str] = None
+    leader_config_path: Optional[str] = None
 
     # follower (slave arm) CAN channels
     follower_can_left: Optional[str] = None

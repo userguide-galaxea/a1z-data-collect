@@ -1,6 +1,5 @@
-import time
 import numpy as np
-from sdk.a1z.robots.get_robot import get_a1z_robot
+from a1z.robots.get_robot import get_a1z_robot
 from utils.interfaces import FollowerArmInterface
 
 _SOFT_KP = np.array([6.0, 6.0, 6.0, 4.0, 1.0, 1.0])
@@ -30,7 +29,8 @@ class A1ZFollowerArm(FollowerArmInterface):
             "pos": action[:6],
             "vel": velocity[:6] if velocity is not None else np.zeros(6),
         }
-        self._robot.command_joint_state(cmd)
+        if not self._robot.command_joint_state(cmd):
+            raise RuntimeError("A1Z SDK rejected the follower joint command")
         if self._robot.gripper is not None and len(action) > 6:
             self._robot.command_gripper(float(np.clip(action[6], 0.0, 1.0)))
 
@@ -39,23 +39,8 @@ class A1ZFollowerArm(FollowerArmInterface):
 
     def stop(self) -> None:
         self._robot.stop()
-        chain = getattr(self._robot, "_motor_chain", None)
-        gripper = self._robot.gripper
-        for _ in range(2):
-            time.sleep(0.015)
-            if chain is not None:
-                try:
-                    chain.disable_all()
-                except Exception:
-                    pass
-            if gripper is not None:
-                try:
-                    gripper.disable()
-                except Exception:
-                    pass
+        if self._robot.is_running:
+            raise RuntimeError("A1Z SDK control thread is still running after stop")
         bus = getattr(self._robot, "_bus", None)
         if bus is not None:
-            try:
-                bus.shutdown()
-            except Exception:
-                pass
+            bus.shutdown()

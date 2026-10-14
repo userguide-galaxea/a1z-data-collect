@@ -6,7 +6,8 @@ hdf5_cfg:
 arm_cfg:
   collection_type: one_master_slave
   leader_port_left: /dev/ttyACM0
-  follower_can_left: can0
+  leader_config_path: null  # or cfg/a1z_t.yaml with a1z_t_version: EVT/PVT
+  follower_can_left: can_left
   use_velocity: false
   use_effort: false
 camera_cfg:
