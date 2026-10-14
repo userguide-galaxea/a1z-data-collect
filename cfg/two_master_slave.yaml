@@ -6,7 +6,7 @@ hdf5_cfg:
 arm_cfg:
   collection_type: two_master_slave
   leader_port_left: /dev/ttyACM0
-  leader_port_right: /dev/ttyACM0
+  leader_port_right: /dev/ttyACM1
   follower_can_left: can0
   follower_can_right: can1
   use_velocity: true

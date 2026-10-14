@@ -7,6 +7,7 @@ Usage:
 """
 
 import time
+from pathlib import Path
 
 from omegaconf import OmegaConf
 from utils.cfg import DataCollectionCfg, build_config
@@ -22,25 +23,20 @@ from robots.teleop_delta_controller import DeltaTeleopController, DualDeltaTeleo
 from robots.camera_opencv import OpenCVCamera
 from robots.camera_calibration import calibrate_cameras
 from robots.dual_arm import DualArmLeader, DualArmFollower
-from leader import DynamixelBus
 
 
 def _make_dual_leader(arm_cfg) -> DualArmLeader:
-    """Build a DualArmLeader, using a shared bus when both ports are the same (daisy-chain)."""
+    """Build a dual Leader from two independent serial ports."""
     port_l = arm_cfg.leader_port_left
     port_r = arm_cfg.leader_port_right
 
-    if port_l == port_r:
-        shared_bus = DynamixelBus(port_l, 1_000_000, list(range(1, 15)))
-        left  = A1ZTLeaderArm(port=port_l, side="left",  shared_bus=shared_bus)
-        right = A1ZTLeaderArm(port=port_r, side="right", shared_bus=shared_bus)
-        print(f"[DualArmLeader] daisy-chain mode: both arms on {port_l}")
-        return DualArmLeader(left, right)
-    else:
-        left  = A1ZTLeaderArm(port=port_l, side="left")
-        right = A1ZTLeaderArm(port=port_r, side="right")
-        print(f"[DualArmLeader] independent ports: left={port_l}  right={port_r}")
-        return DualArmLeader(left, right)
+    if Path(port_l).resolve() == Path(port_r).resolve():
+        raise ValueError("a1z-t requires separate left and right Leader serial ports")
+
+    left = A1ZTLeaderArm(port=port_l, side="left")
+    right = A1ZTLeaderArm(port=port_r, side="right")
+    print(f"[DualArmLeader] independent ports: left={port_l}  right={port_r}")
+    return DualArmLeader(left, right)
 
 
 def make_arm_readers(

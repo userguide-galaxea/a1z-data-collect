@@ -1,3 +1,4 @@
-[submodule "open-a1z-t"]
-	path = open-a1z-t
-	url = https://github.com/userguide-galaxea/OpenA1Z-T
+[submodule "a1z-t"]
+	path = a1z-t
+	url = https://gitlab.galaxea-ai.com/lemo/a1z-t.git
+	branch = dev

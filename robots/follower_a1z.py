@@ -1,19 +1,11 @@
 import time
 import numpy as np
-from a1z.robots.get_robot import get_a1z_robot
-from leader import load_config
+from sdk.a1z.robots.get_robot import get_a1z_robot
 from utils.interfaces import FollowerArmInterface
 
 _SOFT_KP = np.array([6.0, 6.0, 6.0, 4.0, 1.0, 1.0])
 _CONTROL_HZ = 100
 _MIN_FREQ_HZ = 40.0
-
-
-def _load_pd_gains():
-    cfg = load_config()
-    kp = np.array(cfg["follower_pd"]["kp"], dtype=float)
-    kd = np.array(cfg["follower_pd"]["kd"], dtype=float)
-    return kp, kd
 
 
 class A1ZFollowerArm(FollowerArmInterface):
@@ -28,21 +20,19 @@ class A1ZFollowerArm(FollowerArmInterface):
             control_freq_hz=_CONTROL_HZ,
             min_freq_hz=_MIN_FREQ_HZ,
         )
-        self._kp, self._kd = _load_pd_gains()
 
     def start(self) -> None:
         self._robot.start(initial_kp=_SOFT_KP)
 
     def command(self, action: np.ndarray, velocity: np.ndarray | None = None) -> None:
+        # The pinned A1Z SDK supplies its default PD gains when kp/kd are omitted.
         cmd = {
             "pos": action[:6],
             "vel": velocity[:6] if velocity is not None else np.zeros(6),
-            "kp": self._kp,
-            "kd": self._kd,
         }
         self._robot.command_joint_state(cmd)
         if self._robot.gripper is not None and len(action) > 6:
-            self._robot.gripper.command(float(np.clip(action[6], 0.0, 1.0)))
+            self._robot.command_gripper(float(np.clip(action[6], 0.0, 1.0)))
 
     def get_joint_pos(self) -> np.ndarray:
         return self._robot.get_joint_pos()

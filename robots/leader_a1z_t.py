@@ -1,5 +1,6 @@
 import numpy as np
-from leader import DynamixelServoReader, DynamixelBus, load_config
+from sdk.leader import DynamixelServoReader, DynamixelBus
+from teleop_app.config import load_config
 from utils.interfaces import LeaderArmInterface
 
 

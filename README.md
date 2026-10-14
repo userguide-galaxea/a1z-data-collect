@@ -10,7 +10,7 @@ A1Z 机械臂遥操作数据采集工具。一条命令同时启动遥操作和�
 
 ```bash
 git clone --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
-cd a1z_data_collection
+cd a1z-data-collect
 ```
 
 如果已经 clone 但忘了带 `--recurse-submodules`：
@@ -21,21 +21,19 @@ git submodule update --init --recursive
 
 ### 2. 安装依赖
 
-> **注意**：`GALAXEA-A1Z` 是 `open-a1z-t` 内的嵌套 submodule。安装前请先确认已完整初始化所有 submodule（`--recurse-submodules` 或 `git submodule update --init --recursive` 会自动处理）。若 `open-a1z-t/GALAXEA-A1Z` 目录为空，运行：
-> ```bash
-> cd open-a1z-t && git submodule update --init && cd ..
-> ```
+`a1z-t` 子模块当前固定到 GitLab `dev` 分支上的提交；克隆时需要有该仓库的读取权限。A1Z SDK 已包含在 `a1z-t` 中，无需安装嵌套仓库。
 
 ```bash
-pip install -e open-a1z-t
-pip install -e open-a1z-t/GALAXEA-A1Z
+pip install -e a1z-t
 pip install -e .
 ```
 
 ### 3. 配置 CAN 总线
 
 ```bash
-bash open-a1z-t/scripts/setup_can.sh
+bash a1z-t/scripts/setup_can.sh can0
+# 双臂时再配置右臂，接口名应与 cfg/*.yaml 中的 follower_can_* 一致
+bash a1z-t/scripts/setup_can.sh can1
 ```
 
 ---
@@ -43,7 +41,7 @@ bash open-a1z-t/scripts/setup_can.sh
 ## 项目结构
 
 ```
-a1z_data_collection/
+a1z-data-collect/
 ├── cfg/
 │   └── two_master_slave.yaml       # 示例配置
 ├── collectors/
@@ -63,7 +61,7 @@ a1z_data_collection/
 │   └── key_handle.py               # 键盘控制
 ├── scripts/
 │   └── record_data.py              # 主入口
-└── open-a1z-t/                     # git submodule
+└── a1z-t/                          # git submodule（含 Leader 与 A1Z SDK）
 ```
 
 ---
@@ -119,7 +117,9 @@ collector_cfg:
 | `one_master_slave` | 单臂主从遥操作 | 从臂关节位置 (7,) | 主臂关节位置 (7,) |
 | `two_master_slave` | 双臂主从遥操作 | 双臂从臂位置 (14,) | 双臂主臂位置 (14,) |
 
-7 维 = [j1..j6 rad, gripper_norm]，gripper_norm 范围 0.0（张开）~ 1.0（闭合）。双臂为 14 维 = [left(7), right(7)]。
+7 维 = [j1..j6 rad, gripper_norm]，gripper_norm 范围 0.0（闭合）~ 1.0（张开）。双臂为 14 维 = [left(7), right(7)]。
+
+双臂 Leader 需要配置两个独立串口；新版 `a1z-t` 的左右臂均使用 1–7 号舵机，不能把两侧指向同一个串口。
 
 ---
 
