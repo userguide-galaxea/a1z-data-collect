@@ -37,7 +37,7 @@ git submodule update --init --recursive
 
 ### 2. 安装依赖
 
-需要 Ubuntu 22.04 和 Python 3.11 或更高版本。`a1z-t` 子模块固定到 GitLab `main` 的一个提交；克隆时需要该仓库的读取权限。A1Z SDK 是独立依赖，其版本由 `a1z-t/pyproject.toml` 固定。先按 `a1z-t/README.md` 准备 Python 环境，再在**同一环境**中安装：
+需要 Ubuntu 22.04 和 Python 3.11 或更高版本。`a1z-t` 子模块来自 [GitHub 仓库](https://github.com/userguide-galaxea/a1z-t)，固定到其 `main` 分支的一个提交。A1Z SDK 是独立依赖，其版本由 `a1z-t/pyproject.toml` 固定。先按 `a1z-t/README.md` 准备 Python 环境，再在**同一环境**中安装：
 
 ```bash
 python -m pip install -e ./a1z-t

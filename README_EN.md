@@ -37,7 +37,7 @@ git submodule update --init --recursive
 
 ### 2. Install dependencies
 
-Ubuntu 22.04 and Python 3.11 or newer are required. The `a1z-t` submodule is pinned to a commit on its GitLab `main` branch, so cloning requires read access to that repository. The A1Z SDK is a separate dependency whose version is pinned by `a1z-t/pyproject.toml`. Prepare a Python environment as described in `a1z-t/README.md`, then install both projects in **the same environment**:
+Ubuntu 22.04 and Python 3.11 or newer are required. The `a1z-t` submodule comes from its [GitHub repository](https://github.com/userguide-galaxea/a1z-t) and is pinned to a commit on its `main` branch. The A1Z SDK is a separate dependency whose version is pinned by `a1z-t/pyproject.toml`. Prepare a Python environment as described in `a1z-t/README.md`, then install both projects in **the same environment**:
 
 ```bash
 python -m pip install -e ./a1z-t
