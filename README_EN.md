@@ -44,7 +44,7 @@ python -m pip install -e ./a1z-t
 python -m pip install -e .
 ```
 
-A recursive clone also checks out the `a1z-t/GALAXEA-A1Z` SDK source submodule. Installing `a1z-t` obtains the pinned version of the `a1z` package through its project dependencies.
+A recursive clone also checks out the `a1z-t/galaxea_a1z` SDK source submodule. Installing `a1z-t` obtains the pinned version of the `a1z` package through its project dependencies.
 
 ### 3. Configure the CAN bus
 

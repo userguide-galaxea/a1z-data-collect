@@ -44,7 +44,7 @@ python -m pip install -e ./a1z-t
 python -m pip install -e .
 ```
 
-递归克隆还会检出 `a1z-t/GALAXEA-A1Z` SDK 源码子模块；安装 `a1z-t` 时会按其项目依赖取得固定版本的 `a1z` 包。
+递归克隆还会检出 `a1z-t/galaxea_a1z` SDK 源码子模块；安装 `a1z-t` 时会按其项目依赖取得固定版本的 `a1z` 包。
 
 ### 3. 配置 CAN 总线
 
