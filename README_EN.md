@@ -11,7 +11,7 @@ A teleoperation data collection tool for an A1Z-T Leader and an A1Z Follower. On
 | `legacy/open-a1z-t` | Galaxea's open-source OpenA1Z-T hardware | [OpenA1Z-T](https://github.com/userguide-galaxea/OpenA1Z-T) |
 | `main` | Galaxea's current A1Z-T hardware | `a1z-t` |
 
-The installation, configuration, and usage instructions below apply to `main`. For the open-source hardware, clone `legacy/open-a1z-t` directly and follow the README on that branch. This avoids fetching the `a1z-t` submodule from `main` first:
+The installation, configuration, and usage instructions below apply to `main`. For the open-source hardware, clone `legacy/open-a1z-t` directly and follow the README on that branch. This avoids cloning `a1z-t` on `main` as well:
 
 ```bash
 git clone --branch legacy/open-a1z-t --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
@@ -25,26 +25,42 @@ cd a1z-data-collect
 ### 1. Clone the repository
 
 ```bash
-git clone --branch main --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
+git clone --branch main https://github.com/userguide-galaxea/a1z-data-collect.git
 cd a1z-data-collect
 ```
 
-If you cloned without `--recurse-submodules`, initialize the submodules afterward:
+`a1z-t` is no longer a submodule. Clone it separately at the repository root; the path is listed in `.gitignore` so it does not pollute this repository's Git status:
 
 ```bash
-git submodule update --init --recursive
+git clone --branch main https://github.com/userguide-galaxea/a1z-t.git a1z-t
+```
+
+`a1z-t` follows its `main` branch. Update it by pulling inside that directory; this repository needs no change:
+
+```bash
+git -C a1z-t pull --ff-only
+python -m pip install -e ./a1z-t      # upstream dependencies may change; reinstall after updating
+```
+
+**Currently tested versions**: `a1z-t` `61f19bb0af7194b77a22991b795e389550815bf8`, whose SDK is `156af498a947a830ca38efff4dd08fd2da96a200`. If an upstream update misbehaves, go back to that commit:
+
+```bash
+git -C a1z-t checkout 61f19bb0af7194b77a22991b795e389550815bf8
+python -m pip install -e ./a1z-t
 ```
 
 ### 2. Install dependencies
 
-Ubuntu 22.04 and Python 3.11 or newer are required. The `a1z-t` submodule comes from its [GitHub repository](https://github.com/userguide-galaxea/a1z-t) and is pinned to a commit on its `main` branch. The A1Z SDK is a separate dependency whose version is pinned by `a1z-t/pyproject.toml`. Prepare a Python environment as described in `a1z-t/README.md`, then install both projects in **the same environment**:
+Ubuntu 22.04 and Python 3.11 or newer are required. Clone `a1z-t` separately as described above; it follows its `main` branch and this repository only records the tested baseline. The A1Z SDK is also a separate clone (`a1z-t` no longer references it as a submodule). Prepare a Python environment as described in `a1z-t/README.md`, then install the SDK, `a1z-t` and this project in **the same environment**:
 
 ```bash
+git clone --branch main https://github.com/userguide-galaxea/galaxea_a1z.git a1z-t/galaxea_a1z
+python -m pip install -e ./a1z-t/galaxea_a1z
 python -m pip install -e ./a1z-t
 python -m pip install -e .
 ```
 
-A recursive clone also checks out the `a1z-t/galaxea_a1z` SDK source submodule. Installing `a1z-t` obtains the pinned version of the `a1z` package through its project dependencies.
+`galaxea_a1z` follows upstream `main`; the commit tested with this repository is `156af498a947a830ca38efff4dd08fd2da96a200`. Update it with `git -C a1z-t/galaxea_a1z pull --ff-only`, or roll back with `git -C a1z-t/galaxea_a1z checkout 156af498a947a830ca38efff4dd08fd2da96a200` and reinstall.
 
 ### 3. Configure the CAN bus
 
@@ -93,7 +109,7 @@ a1z-data-collect/
 │   ├── record_data.py              # Main entry point
 │   ├── setup_ports.sh              # Symlink to the a1z-t device-naming script
 │   └── setup_can.sh                # Symlink to the a1z-t CAN setup script
-└── a1z-t/                          # Git submodule (Leader software with a separate A1Z SDK dependency)
+└── a1z-t/                          # separately cloned Leader software (gitignored), depends on its own A1Z SDK
 ```
 
 ---

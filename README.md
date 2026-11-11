@@ -11,7 +11,7 @@ A1Z-T Leader 与 A1Z Follower 的遥操作数据采集工具。一条命令启�
 | `legacy/open-a1z-t` | 星海图开源版硬件 OpenA1Z-T  | [OpenA1Z-T](https://github.com/userguide-galaxea/OpenA1Z-T) |
 | `main` | 星海图最新 A1Z-T 硬件 | `a1z-t` |
 
-下文的安装、配置和运行说明适用于 `main`。使用开源版硬件时，请直接克隆 `legacy/open-a1z-t` 分支并按照该分支的 README 安装，避免先克隆 `main` 时拉取其 `a1z-t` 子模块：
+下文的安装、配置和运行说明适用于 `main`。使用开源版硬件时，请直接克隆 `legacy/open-a1z-t` 分支并按照该分支的 README 安装，避免在 `main` 分支额外 clone `a1z-t`：
 
 ```bash
 git clone --branch legacy/open-a1z-t --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
@@ -25,26 +25,42 @@ cd a1z-data-collect
 ### 1. 克隆项目
 
 ```bash
-git clone --branch main --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
+git clone --branch main https://github.com/userguide-galaxea/a1z-data-collect.git
 cd a1z-data-collect
 ```
 
-如果已经 clone 但忘了带 `--recurse-submodules`：
+`a1z-t` 不再作为 submodule 引用，需要在仓库根目录单独 clone。该目录已加入 `.gitignore`，不会污染本仓库的 Git 状态：
 
 ```bash
-git submodule update --init --recursive
+git clone --branch main https://github.com/userguide-galaxea/a1z-t.git a1z-t
+```
+
+`a1z-t` 跟随其 `main` 分支；需要更新时进入该目录拉取，父仓库不需要任何改动：
+
+```bash
+git -C a1z-t pull --ff-only
+python -m pip install -e ./a1z-t      # 上游依赖可能变化，更新后重装
+```
+
+**当前测试过的版本**：`a1z-t` `61f19bb0af7194b77a22991b795e389550815bf8`，其锁定的 A1Z SDK 为 `156af498a947a830ca38efff4dd08fd2da96a200`。更新上游后如出现异常，可退回该提交：
+
+```bash
+git -C a1z-t checkout 61f19bb0af7194b77a22991b795e389550815bf8
+python -m pip install -e ./a1z-t
 ```
 
 ### 2. 安装依赖
 
-需要 Ubuntu 22.04 和 Python 3.11 或更高版本。`a1z-t` 子模块来自 [GitHub 仓库](https://github.com/userguide-galaxea/a1z-t)，固定到其 `main` 分支的一个提交。A1Z SDK 是独立依赖，其版本由 `a1z-t/pyproject.toml` 固定。先按 `a1z-t/README.md` 准备 Python 环境，再在**同一环境**中安装：
+需要 Ubuntu 22.04 和 Python 3.11 或更高版本。`a1z-t` 按上文单独 clone，跟随其 `main` 分支；本仓库只记录测试基线。A1Z SDK 也是独立的 clone（`a1z-t` 不再以 submodule 引用它）。先按 `a1z-t/README.md` 准备 Python 环境，再在**同一环境**中依次安装 SDK、`a1z-t` 和本项目：
 
 ```bash
+git clone --branch main https://github.com/userguide-galaxea/galaxea_a1z.git a1z-t/galaxea_a1z
+python -m pip install -e ./a1z-t/galaxea_a1z
 python -m pip install -e ./a1z-t
 python -m pip install -e .
 ```
 
-递归克隆还会检出 `a1z-t/galaxea_a1z` SDK 源码子模块；安装 `a1z-t` 时会按其项目依赖取得固定版本的 `a1z` 包。
+`galaxea_a1z` 跟随上游 `main`，测试过的 commit 为 `156af498a947a830ca38efff4dd08fd2da96a200`。更新 SDK 用 `git -C a1z-t/galaxea_a1z pull --ff-only`，异常时 `git -C a1z-t/galaxea_a1z checkout 156af498a947a830ca38efff4dd08fd2da96a200` 退回并重装。
 
 ### 3. 配置 CAN 总线
 
@@ -93,7 +109,7 @@ a1z-data-collect/
 │   ├── record_data.py              # 主入口
 │   ├── setup_ports.sh              # 软链接到 a1z-t 的设备名称绑定脚本
 │   └── setup_can.sh                # 软链接到 a1z-t 的 CAN 配置脚本
-└── a1z-t/                          # git submodule（Leader 软件，引用独立 A1Z SDK）
+└── a1z-t/                          # 单独 clone 的 Leader 软件（已 gitignore），其中再 clone galaxea_a1z SDK
 ```
 
 ---
