@@ -1,4 +1,4 @@
-# a1z-data-collect
+# a1z_data_collection
 
 [English](README_EN.md) | 简体中文
 
@@ -14,8 +14,8 @@ A1Z-T Leader 与 A1Z Follower 的遥操作数据采集工具。一条命令启�
 下文的安装、配置和运行说明适用于 `main`。使用开源版硬件时，请直接克隆 `legacy/open-a1z-t` 分支并按照该分支的 README 安装，避免在 `main` 分支额外 clone `a1z-t`：
 
 ```bash
-git clone --branch legacy/open-a1z-t --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
-cd a1z-data-collect
+git clone --branch legacy/open-a1z-t --recurse-submodules https://github.com/userguide-galaxea/a1z_data_collection.git
+cd a1z_data_collection
 ```
 
 ---
@@ -25,8 +25,8 @@ cd a1z-data-collect
 ### 1. 克隆项目
 
 ```bash
-git clone --branch main https://github.com/userguide-galaxea/a1z-data-collect.git
-cd a1z-data-collect
+git clone --branch main https://github.com/userguide-galaxea/a1z_data_collection.git
+cd a1z_data_collection
 ```
 
 `a1z-t` 不再作为 submodule 引用，需要在仓库根目录单独 clone。该目录已加入 `.gitignore`，不会污染本仓库的 Git 状态：
@@ -87,7 +87,7 @@ bash scripts/setup_can.sh can_right
 ## 项目结构
 
 ```
-a1z-data-collect/
+a1z_data_collection/
 ├── cfg/
 │   └── two_master_slave.yaml       # 示例配置
 ├── collectors/
@@ -211,7 +211,7 @@ camera_cfg:
 
 ### 启动
 
-在 `a1z-data-collect` 仓库根目录运行：
+在 `a1z_data_collection` 仓库根目录运行：
 
 ```bash
 python -m scripts.record_data config_file=cfg/my_task.yaml

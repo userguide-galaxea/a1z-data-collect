@@ -1,4 +1,4 @@
-# a1z-data-collect
+# a1z_data_collection
 
 English | [简体中文](README.md)
 
@@ -14,8 +14,8 @@ A teleoperation data collection tool for an A1Z-T Leader and an A1Z Follower. On
 The installation, configuration, and usage instructions below apply to `main`. For the open-source hardware, clone `legacy/open-a1z-t` directly and follow the README on that branch. This avoids cloning `a1z-t` on `main` as well:
 
 ```bash
-git clone --branch legacy/open-a1z-t --recurse-submodules https://github.com/userguide-galaxea/a1z-data-collect.git
-cd a1z-data-collect
+git clone --branch legacy/open-a1z-t --recurse-submodules https://github.com/userguide-galaxea/a1z_data_collection.git
+cd a1z_data_collection
 ```
 
 ---
@@ -25,8 +25,8 @@ cd a1z-data-collect
 ### 1. Clone the repository
 
 ```bash
-git clone --branch main https://github.com/userguide-galaxea/a1z-data-collect.git
-cd a1z-data-collect
+git clone --branch main https://github.com/userguide-galaxea/a1z_data_collection.git
+cd a1z_data_collection
 ```
 
 `a1z-t` is no longer a submodule. Clone it separately at the repository root; the path is listed in `.gitignore` so it does not pollute this repository's Git status:
@@ -87,7 +87,7 @@ The example configuration files use these names for `follower_can_left` and `fol
 ## Project layout
 
 ```
-a1z-data-collect/
+a1z_data_collection/
 ├── cfg/
 │   └── two_master_slave.yaml       # Example configuration
 ├── collectors/
@@ -211,7 +211,7 @@ When the program starts, it opens a calibration window:
 
 ### Start
 
-Run this from the `a1z-data-collect` repository root:
+Run this from the `a1z_data_collection` repository root:
 
 ```bash
 python -m scripts.record_data config_file=cfg/my_task.yaml
